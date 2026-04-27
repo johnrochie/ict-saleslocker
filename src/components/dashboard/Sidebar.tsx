@@ -38,6 +38,16 @@ const navItems = [
     ),
   },
   {
+    label: 'Snapshots',
+    href: '/dashboard/snapshots',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75}
+          d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
     label: 'Upload Data',
     href: '/dashboard/upload',
     icon: (
@@ -76,7 +86,6 @@ export default function Sidebar({ userEmail, userName, userRole }: SidebarProps)
   return (
     <aside className="w-60 flex flex-col bg-white border-r border-gray-200 shrink-0">
 
-      {/* Brand header */}
       <div className="px-5 py-5 border-b border-gray-100">
         <Image
           src="/logo.png"
@@ -94,7 +103,6 @@ export default function Sidebar({ userEmail, userName, userRole }: SidebarProps)
         </div>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5">
         {navItems.map((item) => {
           const isActive = item.href === '/dashboard'
@@ -121,7 +129,6 @@ export default function Sidebar({ userEmail, userName, userRole }: SidebarProps)
         })}
       </nav>
 
-      {/* User footer */}
       <div className="px-3 py-4 border-t border-gray-100">
         <div className="flex items-center gap-3 px-2 py-2">
           <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-600 flex items-center
