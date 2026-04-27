@@ -6,7 +6,14 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils/formatting'
 
-const navItems = [
+interface NavItem {
+  label: string
+  href: string
+  icon: React.ReactNode
+  adminOnly?: boolean
+}
+
+const navItems: NavItem[] = [
   {
     label: 'Overview',
     href: '/dashboard',
@@ -50,6 +57,7 @@ const navItems = [
   {
     label: 'Upload Data',
     href: '/dashboard/upload',
+    adminOnly: true,
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75}
@@ -83,6 +91,10 @@ export default function Sidebar({ userEmail, userName, userRole }: SidebarProps)
     .toUpperCase()
     .slice(0, 2)
 
+  const visibleItems = navItems.filter(
+    (item) => !item.adminOnly || ['admin', 'sales_manager'].includes(userRole)
+  )
+
   return (
     <aside className="w-60 flex flex-col bg-white border-r border-gray-200 shrink-0">
 
@@ -104,7 +116,7 @@ export default function Sidebar({ userEmail, userName, userRole }: SidebarProps)
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-0.5">
-        {navItems.map((item) => {
+        {visibleItems.map((item) => {
           const isActive = item.href === '/dashboard'
             ? pathname === '/dashboard'
             : pathname.startsWith(item.href)
