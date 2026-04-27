@@ -23,11 +23,6 @@ interface OppRow {
   projected_close_date: string | null
 }
 
-interface SnapshotRow extends OppRow {
-  snapshot_name: string
-  snapshot_date: string
-}
-
 type Movement = 'won' | 'lost' | 'advanced' | 'regressed' | 'slipped' | 'new' | 'removed' | 'unchanged'
 
 interface DealMovement {
@@ -56,46 +51,22 @@ function stageLabel(stage: string | null, fallbackStatus: string): string {
   if (!stage) return fallbackStatus
   const n = stageNum(stage)
   if (n > 0) return `S${n}`
-  // Non-numbered stages: Lost, Quarantine, etc.
   const lower = stage.toLowerCase()
   if (lower === 'lost') return 'Lost'
   if (lower === 'quarantine') return 'Stale'
-  if (stage.length > 0) return stage.split(' ')[0] // first word as abbreviation
+  if (stage.length > 0) return stage.split(' ')[0]
   return fallbackStatus
 }
 
-function classifyMovement(prev: OppRow, curr: OppRow | undefined): Movement {
-  if (!curr) return 'removed'
-  if (curr.normalised_status === 'won') return 'won'
-  if (curr.normalised_status === 'lost') return 'lost'
-  if (prev.normalised_status === 'pipeline' && curr.normalised_status !== 'pipeline') return 'regressed'
-
-  const prevStage = stageNum(prev.stage)
-  const currStage = stageNum(curr.stage)
-
-  if (currStage > prevStage) return 'advanced'
-  if (currStage < prevStage && currStage > 0) return 'regressed'
-
-  // Check close date slippage
-  if (prev.projected_close_date && curr.projected_close_date) {
-    const prevClose = new Date(prev.projected_close_date).getTime()
-    const currClose = new Date(curr.projected_close_date).getTime()
-    const slippedDays = (currClose - prevClose) / (1000 * 60 * 60 * 24)
-    if (slippedDays > 14) return 'slipped'
-  }
-
-  return 'unchanged'
-}
-
 const MOVEMENT_META: Record<Movement, { label: string; color: string; bg: string; icon: string }> = {
-  won:       { label: 'Won',           color: 'text-green-700',  bg: 'bg-green-50 border-green-200',   icon: '🏆' },
-  lost:      { label: 'Lost',          color: 'text-red-700',    bg: 'bg-red-50 border-red-200',       icon: '✗' },
-  advanced:  { label: 'Advanced',      color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200',     icon: '↑' },
-  regressed: { label: 'Regressed',     color: 'text-amber-700',  bg: 'bg-amber-50 border-amber-200',   icon: '↓' },
-  slipped:   { label: 'Date Slipped',  color: 'text-orange-700', bg: 'bg-orange-50 border-orange-200', icon: '⟶' },
-  new:       { label: 'New',           color: 'text-indigo-700', bg: 'bg-indigo-50 border-indigo-200', icon: '+' },
-  removed:   { label: 'Removed',       color: 'text-gray-500',   bg: 'bg-gray-50 border-gray-200',     icon: '−' },
-  unchanged: { label: 'No Change',     color: 'text-gray-500',   bg: 'bg-gray-50 border-gray-200',     icon: '=' },
+  won:       { label: 'Won',          color: 'text-green-700',  bg: 'bg-green-50 border-green-200',   icon: 'T' },
+  lost:      { label: 'Lost',         color: 'text-red-700',    bg: 'bg-red-50 border-red-200',       icon: 'x' },
+  advanced:  { label: 'Advanced',     color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200',     icon: '^' },
+  regressed: { label: 'Regressed',    color: 'text-amber-700',  bg: 'bg-amber-50 border-amber-200',   icon: 'v' },
+  slipped:   { label: 'Date Slipped', color: 'text-orange-700', bg: 'bg-orange-50 border-orange-200', icon: '>' },
+  new:       { label: 'New',          color: 'text-indigo-700', bg: 'bg-indigo-50 border-indigo-200', icon: '+' },
+  removed:   { label: 'Removed',      color: 'text-gray-500',   bg: 'bg-gray-50 border-gray-200',     icon: '-' },
+  unchanged: { label: 'No Change',    color: 'text-gray-500',   bg: 'bg-gray-50 border-gray-200',     icon: '=' },
 }
 
 export default function SnapshotManager({
@@ -106,7 +77,7 @@ export default function SnapshotManager({
   currentPipeline: OppRow[]
 }) {
   const [snapshotName, setSnapshotName] = useState(
-    `Leadership Meeting — ${new Date().toLocaleDateString('en-IE', { day: '2-digit', month: 'short', year: 'numeric' })}`
+    'Leadership Meeting ' + new Date().toLocaleDateString('en-IE', { day: '2-digit', month: 'short', year: 'numeric' })
   )
   const [saving, setSaving]       = useState(false)
   const [saveMsg, setSaveMsg]     = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -119,7 +90,6 @@ export default function SnapshotManager({
     if (!snapshotName.trim()) return
     setSaving(true)
     setSaveMsg(null)
-
     const res = await fetch('/api/snapshot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -128,56 +98,44 @@ export default function SnapshotManager({
         snapshot_date: new Date().toISOString().slice(0, 10),
       }),
     })
-
     const data = await res.json()
     setSaving(false)
-
     if (!res.ok) {
       setSaveMsg({ type: 'error', text: data.error || 'Failed to save snapshot' })
     } else {
-      setSaveMsg({ type: 'success', text: `Saved — ${data.deals_saved} deals captured in "${data.snapshot_name}"` })
-      // Refresh page to show new snapshot in list
+      setSaveMsg({ type: 'success', text: 'Saved ' + data.deals_saved + ' deals in "' + data.snapshot_name + '"' })
       setTimeout(() => window.location.reload(), 1500)
     }
   }
 
-  async function loadComparison(snapshotName: string) {
+  async function loadComparison(name: string) {
     setLoadingComp(true)
-    setComparing(snapshotName)
+    setComparing(name)
     setMovements(null)
     setExpanded(null)
-
-    const res = await fetch(
-      `/api/snapshot/compare?name=${encodeURIComponent(snapshotName)}`
-    )
+    const res = await fetch('/api/snapshot/compare?name=' + encodeURIComponent(name))
     const data = await res.json()
     setLoadingComp(false)
-
-    if (res.ok) {
-      setMovements(data.movements)
-    }
+    if (res.ok) setMovements(data.movements)
   }
 
-  // Group movements
-  const grouped = movements ? Object.entries(
-    movements.reduce((acc, m) => {
-      if (!acc[m.movement]) acc[m.movement] = []
-      acc[m.movement].push(m)
-      return acc
-    }, {} as Record<Movement, DealMovement[]>)
-  ) : []
-
   const displayOrder: Movement[] = ['won', 'lost', 'advanced', 'regressed', 'slipped', 'new', 'removed', 'unchanged']
-  const groupedSorted = displayOrder
-    .map(mv => [mv, grouped.find(([k]) => k === mv)?.[1] || []] as [Movement, DealMovement[]])
-    .filter(([, deals]) => deals.length > 0)
 
-  const valueByMovement = (mv: Movement) =>
-    (grouped.find(([k]) => k === mv)?.[1] || []).reduce((s, d) => s + d.revenue, 0)
+  const groupedSorted = movements
+    ? displayOrder
+        .map((mv) => {
+          const deals = movements.filter((m) => m.movement === mv)
+          return [mv, deals] as [Movement, DealMovement[]]
+        })
+        .filter(([, deals]) => deals.length > 0)
+    : []
+
+  const pipelineCount = currentPipeline.filter(
+    (o) => o.normalised_status === 'pipeline' || o.normalised_status === 'on_hold' || o.normalised_status === 'on_hold_stale'
+  ).length
 
   return (
     <div className="space-y-6">
-
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Pipeline Snapshots</h1>
         <p className="text-sm text-gray-500 mt-0.5">
@@ -185,50 +143,40 @@ export default function SnapshotManager({
         </p>
       </div>
 
-      {/* ── Save new snapshot ───────────────────────────────── */}
+      {/* Save snapshot */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <h2 className="text-sm font-semibold text-navy-700 mb-4">Save snapshot now</h2>
+        <h2 className="text-sm font-semibold text-navy-700 mb-1">Save snapshot now</h2>
         <p className="text-sm text-gray-500 mb-4">
-          Captures all {currentPipeline.filter(o => ['pipeline','on_hold','on_hold_stale'].includes(o.normalised_status)).length} active pipeline deals as they stand today.
-          Name it something you can identify at the next meeting.
+          Captures all {pipelineCount} active pipeline deals as they stand today.
         </p>
         <div className="flex gap-3 items-start">
           <input
             type="text"
             value={snapshotName}
             onChange={(e) => setSnapshotName(e.target.value)}
-            className="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-navy-700
-                       focus:outline-none focus:ring-2 focus:ring-brand-500"
-            placeholder="e.g. Leadership Meeting — 22 Apr 2026"
+            className="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-navy-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            placeholder="e.g. Leadership Meeting 22 Apr 2026"
           />
           <button
             onClick={saveSnapshot}
             disabled={saving || !snapshotName.trim()}
-            className="rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white
-                       hover:bg-brand-600 disabled:opacity-60 disabled:cursor-not-allowed
-                       transition-colors whitespace-nowrap"
+            className="rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
           >
             {saving ? 'Saving...' : 'Save Snapshot'}
           </button>
         </div>
-
         {saveMsg && (
-          <div className={`mt-3 rounded-lg px-4 py-3 text-sm border ${
-            saveMsg.type === 'success'
-              ? 'bg-green-50 border-green-200 text-green-700'
-              : 'bg-red-50 border-red-200 text-red-700'
-          }`}>
+          <div className={'mt-3 rounded-lg px-4 py-3 text-sm border ' + (saveMsg.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700')}>
             {saveMsg.text}
           </div>
         )}
       </div>
 
-      {/* ── Saved snapshots ─────────────────────────────────── */}
+      {/* Saved snapshots list */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <h2 className="text-sm font-semibold text-navy-700 mb-4">
           Saved snapshots ({snapshots.length})
         </h2>
-
         {snapshots.length === 0 ? (
           <p className="text-sm text-gray-400 italic py-4 text-center">
             No snapshots saved yet. Save one above before the next meeting.
@@ -236,26 +184,22 @@ export default function SnapshotManager({
         ) : (
           <div className="space-y-2">
             {snapshots.map((s) => (
-              <div key={s.name}
-                className="flex items-center gap-4 p-4 rounded-lg border border-gray-100 bg-gray-50 hover:bg-gray-100 transition-colors">
+              <div key={s.name} className="flex items-center gap-4 p-4 rounded-lg border border-gray-100 bg-gray-50">
                 <div className="w-8 h-8 rounded-lg bg-navy-700 flex items-center justify-center shrink-0">
                   <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-navy-700 truncate">{s.name}</p>
                   <p className="text-xs text-gray-400">
-                    {formatDate(s.date)} &nbsp;·&nbsp; {s.count} deals &nbsp;·&nbsp; saved by {s.taken_by}
+                    {formatDate(s.date)} &nbsp;·&nbsp; {s.count} deals &nbsp;·&nbsp; {s.taken_by}
                   </p>
                 </div>
                 <button
                   onClick={() => loadComparison(s.name)}
                   disabled={loadingComp && comparing === s.name}
-                  className="rounded-lg border border-brand-500 text-brand-500 px-4 py-1.5 text-xs
-                             font-semibold hover:bg-brand-50 transition-colors whitespace-nowrap
-                             disabled:opacity-60"
+                  className="rounded-lg border border-brand-500 text-brand-500 px-4 py-1.5 text-xs font-semibold hover:bg-brand-50 transition-colors whitespace-nowrap disabled:opacity-60"
                 >
                   {loadingComp && comparing === s.name ? 'Loading...' : 'Compare to now'}
                 </button>
@@ -265,18 +209,15 @@ export default function SnapshotManager({
         )}
       </div>
 
-      {/* ── Movement comparison ─────────────────────────────── */}
+      {/* Movement comparison */}
       {movements && comparing && (
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold text-navy-700">
-              Pipeline movement since &ldquo;{comparing}&rdquo;
+              Pipeline movement since &quot;{comparing}&quot;
             </h2>
-            <button
-              onClick={() => { setMovements(null); setComparing(null) }}
-              className="text-xs text-gray-400 hover:text-gray-600"
-            >
-              ✕ close
+            <button onClick={() => { setMovements(null); setComparing(null) }} className="text-xs text-gray-400 hover:text-gray-600">
+              x close
             </button>
           </div>
 
@@ -284,22 +225,18 @@ export default function SnapshotManager({
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {(['won', 'lost', 'advanced', 'new'] as Movement[]).map((mv) => {
               const meta = MOVEMENT_META[mv]
-              const deals = movements.filter(m => m.movement === mv)
+              const deals = movements.filter((m) => m.movement === mv)
               const value = deals.reduce((s, d) => s + d.revenue, 0)
               return (
-                <div key={mv}
-                  className={`rounded-xl border p-4 cursor-pointer transition-all ${meta.bg} ${
-                    expanded === mv ? 'ring-2 ring-brand-500' : ''
-                  }`}
+                <div
+                  key={mv}
+                  className={'rounded-xl border p-4 cursor-pointer transition-all ' + meta.bg + (expanded === mv ? ' ring-2 ring-brand-500' : '')}
                   onClick={() => setExpanded(expanded === mv ? null : mv)}
                 >
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-base">{meta.icon}</span>
-                    <span className={`text-xs font-bold uppercase tracking-wide ${meta.color}`}>
-                      {meta.label}
-                    </span>
+                    <span className={'text-xs font-bold uppercase tracking-wide ' + meta.color}>{meta.label}</span>
                   </div>
-                  <p className={`text-xl font-bold ${meta.color}`}>{formatCompact(value)}</p>
+                  <p className={'text-xl font-bold ' + meta.color}>{formatCompact(value)}</p>
                   <p className="text-xs text-gray-400 mt-0.5">{deals.length} deal{deals.length !== 1 ? 's' : ''}</p>
                 </div>
               )
@@ -313,98 +250,87 @@ export default function SnapshotManager({
               <p className="text-xs text-gray-400 mt-0.5">Click a category to expand deals</p>
             </div>
 
-            {groupedSorted
-              .filter(([mv]) => mv !== 'unchanged')
-              .map(([mv, deals]) => {
-                const meta = MOVEMENT_META[mv]
-                const totalValue = deals.reduce((s, d) => s + d.revenue, 0)
-                const isOpen = expanded === mv
+            {groupedSorted.filter(([mv]) => mv !== 'unchanged').map(([mv, deals]) => {
+              const meta = MOVEMENT_META[mv]
+              const totalValue = deals.reduce((s, d) => s + d.revenue, 0)
+              const isOpen = expanded === mv
+              return (
+                <div key={mv} className="border-b border-gray-100 last:border-0">
+                  <button
+                    onClick={() => setExpanded(isOpen ? null : mv)}
+                    className="w-full flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition-colors text-left"
+                  >
+                    <span className={'text-sm font-semibold ' + meta.color}>{meta.label}</span>
+                    <span className="text-xs text-gray-400">{deals.length} deal{deals.length !== 1 ? 's' : ''}</span>
+                    <span className="ml-auto text-sm font-semibold text-gray-700">{formatCompact(totalValue)}</span>
+                    <svg className={'w-4 h-4 text-gray-400 transition-transform ' + (isOpen ? 'rotate-180' : '')} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
 
-                return (
-                  <div key={mv} className="border-b border-gray-100 last:border-0">
-                    {/* Category header */}
-                    <button
-                      onClick={() => setExpanded(isOpen ? null : mv)}
-                      className="w-full flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition-colors text-left"
-                    >
-                      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold border ${meta.bg} ${meta.color}`}>
-                        {meta.icon}
-                      </span>
-                      <span className={`text-sm font-semibold ${meta.color}`}>{meta.label}</span>
-                      <span className="text-xs text-gray-400">{deals.length} deal{deals.length !== 1 ? 's' : ''}</span>
-                      <span className="ml-auto text-sm font-semibold text-gray-700">{formatCompact(totalValue)}</span>
-                      <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-                        fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
+                  {isOpen && (
+                    <div className="border-t border-gray-100 overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-gray-50 text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                            <th className="text-left px-5 py-2">Company</th>
+                            <th className="text-left px-4 py-2">Opportunity</th>
+                            <th className="text-left px-4 py-2">Rep</th>
+                            <th className="text-right px-4 py-2">Revenue</th>
+                            <th className="text-center px-4 py-2">Was</th>
+                            <th className="text-center px-4 py-2">Now</th>
+                            {mv === 'slipped' && <th className="text-right px-4 py-2">Close Date</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {deals.sort((a, b) => b.revenue - a.revenue).map((deal) => {
+                            const rep = deal.account_manager?.includes(',')
+                              ? deal.account_manager.split(',').map((s: string) => s.trim()).reverse().join(' ')
+                              : (deal.account_manager || '—')
+                            return (
+                              <tr key={deal.composite_key} className="hover:bg-gray-50">
+                                <td className="px-5 py-2.5 font-medium text-navy-700 max-w-[140px]">
+                                  <span className="truncate block">{deal.company}</span>
+                                </td>
+                                <td className="px-4 py-2.5 text-gray-600 max-w-[220px]">
+                                  <span className="truncate block">{deal.opportunity_name}</span>
+                                </td>
+                                <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{rep}</td>
+                                <td className="px-4 py-2.5 text-right font-semibold text-gray-700 whitespace-nowrap">
+                                  {formatCompact(deal.revenue)}
+                                </td>
+                                <td className="px-4 py-2.5 text-center">
+                                  <span className="inline-block bg-gray-100 text-gray-600 text-xs font-medium px-2 py-0.5 rounded">
+                                    {stageLabel(deal.prev_stage, deal.prev_status)}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2.5 text-center">
+                                  <span className={'inline-block text-xs font-medium px-2 py-0.5 rounded border ' + meta.bg + ' ' + meta.color}>
+                                    {stageLabel(deal.curr_stage, deal.curr_status)}
+                                  </span>
+                                </td>
+                                {mv === 'slipped' && (
+                                  <td className="px-4 py-2.5 text-right text-xs text-orange-600 font-medium whitespace-nowrap">
+                                    {formatDate(deal.prev_close)} to {formatDate(deal.curr_close)}
+                                  </td>
+                                )}
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
 
-                    {/* Deal rows */}
-                    {isOpen && (
-                      <div className="border-t border-gray-100 overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="bg-gray-50 text-xs font-semibold text-gray-400 uppercase tracking-wide">
-                              <th className="text-left px-5 py-2">Company</th>
-                              <th className="text-left px-4 py-2">Opportunity</th>
-                              <th className="text-left px-4 py-2">Rep</th>
-                              <th className="text-right px-4 py-2">Revenue</th>
-                              <th className="text-center px-4 py-2">Was</th>
-                              <th className="text-center px-4 py-2">Now</th>
-                              {(mv === 'slipped') && <th className="text-right px-4 py-2">Close Date</th>}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-50">
-                            {deals.sort((a, b) => b.revenue - a.revenue).map((deal) => {
-                              const rep = deal.account_manager?.includes(',')
-                                ? deal.account_manager.split(',').map(s => s.trim()).reverse().join(' ')
-                                : (deal.account_manager || '—')
-                              return (
-                                <tr key={deal.composite_key} className="hover:bg-gray-50">
-                                  <td className="px-5 py-2.5 font-medium text-navy-700 max-w-[140px]">
-                                    <span className="truncate block">{deal.company}</span>
-                                  </td>
-                                  <td className="px-4 py-2.5 text-gray-600 max-w-[220px]">
-                                    <span className="truncate block">{deal.opportunity_name}</span>
-                                  </td>
-                                  <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{rep}</td>
-                                  <td className="px-4 py-2.5 text-right font-semibold text-gray-700 whitespace-nowrap">
-                                    {formatCompact(deal.revenue)}
-                                  </td>
-                                  <td className="px-4 py-2.5 text-center">
-                                    <span className="inline-block bg-gray-100 text-gray-600 text-xs font-medium px-2 py-0.5 rounded">
-                                      {stageLabel(deal.prev_stage, deal.prev_status)}
-                                    </span>
-                                  </td>
-                                  <td className="px-4 py-2.5 text-center">
-                                    <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded border ${meta.bg} ${meta.color}`}>
-                                      {stageLabel(deal.curr_stage, deal.curr_status)}
-                                    </span>
-                                  </td>
-                                  {mv === 'slipped' && (
-                                    <td className="px-4 py-2.5 text-right text-xs text-orange-600 font-medium whitespace-nowrap">
-                                      {formatDate(deal.prev_close)} → {formatDate(deal.curr_close)}
-                                    </td>
-                                  )}
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-
-            {/* Unchanged summary (no drill-down needed) */}
-            {movements.filter(m => m.movement === 'unchanged').length > 0 && (
+            {movements.filter((m) => m.movement === 'unchanged').length > 0 && (
               <div className="flex items-center gap-4 px-5 py-3 text-gray-400">
-                <span className="text-xs font-semibold uppercase tracking-wide">=</span>
                 <span className="text-sm">No change</span>
-                <span className="text-xs">{movements.filter(m => m.movement === 'unchanged').length} deals unchanged</span>
+                <span className="text-xs">{movements.filter((m) => m.movement === 'unchanged').length} deals unchanged</span>
                 <span className="ml-auto text-sm font-semibold">
-                  {formatCompact(movements.filter(m => m.movement === 'unchanged').reduce((s, d) => s + d.revenue, 0))}
+                  {formatCompact(movements.filter((m) => m.movement === 'unchanged').reduce((s, d) => s + d.revenue, 0))}
                 </span>
               </div>
             )}
