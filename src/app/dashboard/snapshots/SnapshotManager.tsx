@@ -52,6 +52,18 @@ function stageNum(s: string | null): number {
   return m ? parseInt(m[1]) : 0
 }
 
+function stageLabel(stage: string | null, fallbackStatus: string): string {
+  if (!stage) return fallbackStatus
+  const n = stageNum(stage)
+  if (n > 0) return `S${n}`
+  // Non-numbered stages: Lost, Quarantine, etc.
+  const lower = stage.toLowerCase()
+  if (lower === 'lost') return 'Lost'
+  if (lower === 'quarantine') return 'Stale'
+  if (stage.length > 0) return stage.split(' ')[0] // first word as abbreviation
+  return fallbackStatus
+}
+
 function classifyMovement(prev: OppRow, curr: OppRow | undefined): Movement {
   if (!curr) return 'removed'
   if (curr.normalised_status === 'won') return 'won'
@@ -361,12 +373,12 @@ export default function SnapshotManager({
                                   </td>
                                   <td className="px-4 py-2.5 text-center">
                                     <span className="inline-block bg-gray-100 text-gray-600 text-xs font-medium px-2 py-0.5 rounded">
-                                      {deal.prev_stage ? `S${stageNum(deal.prev_stage)}` : deal.prev_status}
+                                      {stageLabel(deal.prev_stage, deal.prev_status)}
                                     </span>
                                   </td>
                                   <td className="px-4 py-2.5 text-center">
                                     <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded border ${meta.bg} ${meta.color}`}>
-                                      {deal.curr_stage ? `S${stageNum(deal.curr_stage)}` : deal.curr_status}
+                                      {stageLabel(deal.curr_stage, deal.curr_status)}
                                     </span>
                                   </td>
                                   {mv === 'slipped' && (
