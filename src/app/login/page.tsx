@@ -17,15 +17,12 @@ export default function LoginPage() {
     e.preventDefault()
     setLoading(true)
     setError(null)
-
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-
     if (error) {
       setError('Invalid email or password. Please try again.')
       setLoading(false)
       return
     }
-
     router.push('/dashboard')
     router.refresh()
   }
@@ -35,13 +32,13 @@ export default function LoginPage() {
 
       {/* Left panel */}
       <div className="hidden lg:flex lg:w-1/2 bg-navy-700 flex-col justify-between p-12">
-        <div>
+        <div className="inline-block bg-white rounded-xl px-5 py-3">
           <Image
-            src="/logo.png"
+            src="/logo1.png"
             alt="ICT Services"
-            width={140}
-            height={60}
-            className="brightness-0 invert"
+            width={120}
+            height={50}
+            className="object-contain"
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
           />
         </div>
@@ -65,7 +62,7 @@ export default function LoginPage() {
 
           <div className="lg:hidden mb-8 text-center">
             <Image
-              src="/logo.png"
+              src="/logo1.png"
               alt="ICT Services"
               width={120}
               height={52}
@@ -80,7 +77,6 @@ export default function LoginPage() {
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">
-
             {error && (
               <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
                 {error}
@@ -92,15 +88,9 @@ export default function LoginPage() {
                 Email address
               </label>
               <input
-                id="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-navy-700
-                           focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent
-                           placeholder:text-gray-400"
+                id="email" type="email" autoComplete="email" required
+                value={email} onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-navy-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent placeholder:text-gray-400"
                 placeholder="you@ictservices.ie"
               />
             </div>
@@ -110,24 +100,15 @@ export default function LoginPage() {
                 Password
               </label>
               <input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-navy-700
-                           focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                id="password" type="password" autoComplete="current-password" required
+                value={password} onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-navy-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
               />
             </div>
 
             <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex justify-center items-center rounded-lg bg-brand-500 px-4 py-2.5
-                         text-sm font-semibold text-white hover:bg-brand-600 focus:outline-none
-                         focus:ring-2 focus:ring-brand-500 focus:ring-offset-2
-                         disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              type="submit" disabled={loading}
+              className="w-full flex justify-center items-center rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? (
                 <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">

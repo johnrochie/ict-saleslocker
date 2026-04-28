@@ -10,7 +10,7 @@ interface NavItem {
   label: string
   href: string
   icon: React.ReactNode
-  adminOnly?: boolean
+  allowedRoles?: string[]  // if omitted, visible to all authenticated users
 }
 
 const navItems: NavItem[] = [
@@ -45,6 +45,17 @@ const navItems: NavItem[] = [
     ),
   },
   {
+    label: 'Commission',
+    href: '/dashboard/commission',
+    allowedRoles: ['admin', 'sales_manager', 'sales_rep'],
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75}
+          d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+  },
+  {
     label: 'Snapshots',
     href: '/dashboard/snapshots',
     icon: (
@@ -57,7 +68,7 @@ const navItems: NavItem[] = [
   {
     label: 'Upload Data',
     href: '/dashboard/upload',
-    adminOnly: true,
+    allowedRoles: ['admin', 'sales_manager'],
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75}
@@ -84,57 +95,32 @@ export default function Sidebar({ userEmail, userName, userRole }: SidebarProps)
     router.refresh()
   }
 
-  const initials = userName
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2)
+  const initials = userName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
 
-  const visibleItems = navItems.filter(
-    (item) => !item.adminOnly || ['admin', 'sales_manager'].includes(userRole)
+  const visibleItems = navItems.filter(item =>
+    !item.allowedRoles || item.allowedRoles.includes(userRole)
   )
 
   return (
     <aside className="w-60 flex flex-col bg-white border-r border-gray-200 shrink-0">
-
-      <div className="px-5 py-5 border-b border-gray-100">
-        <Image
-          src="/logo.png"
-          alt="ICT Services"
-          width={90}
-          height={38}
-          className="object-contain"
-          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-        />
+      <div className="px-5 py-5 border-b border-gray-100 flex flex-col items-center">
+        <Image src="/logo.png" alt="ICT Services" width={90} height={38} className="object-contain"
+          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
         <div className="flex items-center gap-2 mt-2">
           <div className="w-4 h-0.5 bg-brand-500" />
-          <span className="text-xs font-semibold text-navy-700 tracking-wider uppercase">
-            SalesLocker
-          </span>
+          <span className="text-xs font-semibold text-navy-700 tracking-wider uppercase">SalesLocker</span>
+          <div className="w-4 h-0.5 bg-brand-500" />
         </div>
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-0.5">
         {visibleItems.map((item) => {
-          const isActive = item.href === '/dashboard'
-            ? pathname === '/dashboard'
-            : pathname.startsWith(item.href)
-
+          const isActive = item.href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(item.href)
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-brand-50 text-brand-600'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-navy-700'
-              )}
-            >
-              <span className={isActive ? 'text-brand-500' : 'text-gray-400'}>
-                {item.icon}
-              </span>
+            <Link key={item.href} href={item.href}
+              className={cn('flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                isActive ? 'bg-brand-50 text-brand-600' : 'text-gray-600 hover:bg-gray-50 hover:text-navy-700')}>
+              <span className={isActive ? 'text-brand-500' : 'text-gray-400'}>{item.icon}</span>
               {item.label}
             </Link>
           )
@@ -143,19 +129,14 @@ export default function Sidebar({ userEmail, userName, userRole }: SidebarProps)
 
       <div className="px-3 py-4 border-t border-gray-100">
         <div className="flex items-center gap-3 px-2 py-2">
-          <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-600 flex items-center
-                          justify-center text-xs font-bold shrink-0">
+          <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center text-xs font-bold shrink-0">
             {initials}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-navy-700 truncate">{userName}</p>
             <p className="text-xs text-gray-400 capitalize truncate">{userRole.replace('_', ' ')}</p>
           </div>
-          <button
-            onClick={handleSignOut}
-            className="text-gray-400 hover:text-brand-500 transition-colors"
-            title="Sign out"
-          >
+          <button onClick={handleSignOut} className="text-gray-400 hover:text-brand-500 transition-colors" title="Sign out">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
