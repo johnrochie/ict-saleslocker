@@ -27,8 +27,54 @@ const STATUS_STYLES: Record<string, string> = {
 const TYPE_BADGE: Record<string, string> = {
   type1: 'bg-blue-50 text-blue-700', type2: 'bg-purple-50 text-purple-700', type3: 'bg-green-50 text-green-700',
 }
-const fmtBiz = (t: string | null) => ({ new_client: 'New Client', existing_client: 'Existing', renewal: 'Renewal' }[t ?? ''] ?? (t ?? '-'))
+const BIZ_LABELS: Record<string, string> = { new_client: 'New Client', existing_client: 'Existing', renewal: 'Renewal' }
+const BIZ_COLORS: Record<string, string> = {
+  new_client: 'bg-blue-50 text-blue-700 border-blue-200',
+  existing_client: 'bg-gray-100 text-gray-600 border-gray-200',
+  renewal: 'bg-amber-50 text-amber-700 border-amber-200',
+}
 const fmtCat = (c: string | null) => ({ hardware: 'Hardware', maintenance: 'Maintenance', support_services: 'Support Services' }[c ?? ''] ?? (c ?? '-'))
+
+function BusinessTypeCell({ line, onUpdated }: {
+  line: DealLine
+  onUpdated: (compositeKey: string, newType: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving]   = useState(false)
+  const current = line.business_type || 'existing_client'
+
+  async function save(newType: string) {
+    setSaving(true)
+    const res = await fetch('/api/commission/classify', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ composite_key: line.composite_key, company: line.company, business_type: newType }),
+    })
+    setSaving(false)
+    setEditing(false)
+    if (res.ok) onUpdated(line.composite_key, newType)
+  }
+
+  if (editing) {
+    return (
+      <select autoFocus defaultValue={current} disabled={saving}
+        onChange={e => save(e.target.value)}
+        onBlur={() => setEditing(false)}
+        className="text-xs border border-brand-300 rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-brand-500">
+        <option value="new_client">New Client</option>
+        <option value="existing_client">Existing</option>
+        <option value="renewal">Renewal</option>
+      </select>
+    )
+  }
+
+  return (
+    <button onClick={() => setEditing(true)} title="Click to override"
+      className={'inline-block text-xs font-medium px-2 py-0.5 rounded border cursor-pointer hover:ring-1 hover:ring-brand-400 ' + (BIZ_COLORS[current] || '')}>
+      {BIZ_LABELS[current] || current}
+    </button>
+  )
+}
 
 function exportToCsv(lines: DealLine[], calc: Calculation) {
   const isType1 = calc.commission_type === 'type1'
@@ -37,23 +83,13 @@ function exportToCsv(lines: DealLine[], calc: Calculation) {
     : ['Company','Opportunity','Date','Business Type','Category','Revenue','Cost','Margin']
 
   const rows = lines.map(l => isType1
-    ? [l.company, l.opportunity_name, l.closed_date || '', fmtBiz(l.business_type), fmtCat(l.commission_category),
+    ? [l.company, l.opportunity_name, l.closed_date || '', BIZ_LABELS[l.business_type ?? ''] || (l.business_type ?? ''), fmtCat(l.commission_category),
        l.revenue.toFixed(2), l.direct_cost.toFixed(2), l.subtotal_for_burden.toFixed(2),
        l.burdened_cost.toFixed(2), l.total_cost.toFixed(2), l.margin.toFixed(2),
        (l.rate_applied * 100).toFixed(2) + '%', l.commission_value.toFixed(2)]
-    : [l.company, l.opportunity_name, l.closed_date || '', fmtBiz(l.business_type), fmtCat(l.commission_category),
+    : [l.company, l.opportunity_name, l.closed_date || '', BIZ_LABELS[l.business_type ?? ''] || (l.business_type ?? ''), fmtCat(l.commission_category),
        l.revenue.toFixed(2), l.direct_cost.toFixed(2), l.margin.toFixed(2)]
   )
-
-  const totals = isType1
-    ? ['TOTAL','','','','',
-       lines.reduce((s,l)=>s+l.revenue,0).toFixed(2), lines.reduce((s,l)=>s+l.direct_cost,0).toFixed(2),
-       lines.reduce((s,l)=>s+l.subtotal_for_burden,0).toFixed(2), lines.reduce((s,l)=>s+l.burdened_cost,0).toFixed(2),
-       lines.reduce((s,l)=>s+l.total_cost,0).toFixed(2), lines.reduce((s,l)=>s+l.margin,0).toFixed(2),
-       '', lines.reduce((s,l)=>s+l.commission_value,0).toFixed(2)]
-    : ['TOTAL','','','','',
-       lines.reduce((s,l)=>s+l.revenue,0).toFixed(2), lines.reduce((s,l)=>s+l.direct_cost,0).toFixed(2),
-       lines.reduce((s,l)=>s+l.margin,0).toFixed(2)]
 
   const summaryRows = calc.commission_type === 'type2'
     ? [[], ['Commission Summary'], ['Total Margin', calc.total_margin.toFixed(2)],
@@ -66,12 +102,12 @@ function exportToCsv(lines: DealLine[], calc: Calculation) {
        ['Quarterly Bonus', calc.quarterly_bonus.toFixed(2)]]
     : []
 
-  const allRows = [headers, ...rows, totals, ...summaryRows]
+  const allRows = [headers, ...rows, ...summaryRows]
   const csv = allRows.map(r => r.map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',')).join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
-  a.download = `Commission_${calc.display_name.replace(/\s+/g,'_')}_${calc.quarter_label.replace(/\s+/g,'_')}.csv`
+  a.download = 'Commission_' + calc.display_name.replace(/\s+/g,'_') + '_' + calc.quarter_label.replace(/\s+/g,'_') + '.csv'
   a.click()
 }
 
@@ -94,6 +130,11 @@ export default function CommissionReviewClient({
 
   function flash(type: 'ok' | 'err', text: string) {
     setMsg({ type, text }); setTimeout(() => setMsg(null), 5000)
+  }
+
+  function handleClassificationUpdate(compositeKey: string, newType: string) {
+    setDealLines(prev => prev.map(l => l.composite_key === compositeKey ? { ...l, business_type: newType } : l))
+    flash('ok', 'Classification saved — re-run Calculate & Save to recalculate commission with new classification')
   }
 
   async function runCalc(mode: 'preview' | 'save') {
@@ -153,7 +194,10 @@ export default function CommissionReviewClient({
       {/* Run calculation */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <h2 className="text-sm font-semibold text-navy-700 mb-1">Run quarterly calculation</h2>
-        <p className="text-xs text-gray-400 mb-4">Preview first, then save. Saving stores full deal-level workings for finance review and export.</p>
+        <p className="text-xs text-gray-400 mb-4">
+          Preview first, then save. Saving stores full deal-level workings for finance review.
+          All deals default to Existing Client — override individual deals in the breakdown below if needed.
+        </p>
         <div className="flex items-end gap-3 flex-wrap">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Year</label>
@@ -233,15 +277,12 @@ export default function CommissionReviewClient({
                   <p className="text-xs text-gray-400 mt-0.5">
                     {calc.deals_included} deals &nbsp;·&nbsp; Margin: {formatEuro(calc.total_margin)}
                     {calc.commission_type === 'type3' && calc.cumulative_margin_ytd !== null && (
-                      <span> &nbsp;·&nbsp; YTD: {formatEuro(calc.cumulative_margin_ytd)} vs {formatEuro(calc.cumulative_target_ytd ?? 0)} target</span>
+                      <span> &nbsp;·&nbsp; YTD: {formatEuro(calc.cumulative_margin_ytd)} vs {formatEuro(calc.cumulative_target_ytd ?? 0)}</span>
                     )}
                   </p>
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-sm font-bold text-green-700">{formatEuro(calc.total_payable)}</p>
-                  {calc.commission_type === 'type1' && calc.commission_earned > 0 && (
-                    <p className="text-xs text-gray-400">commission on {formatEuro(calc.total_margin)} margin</p>
-                  )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {calc.status === 'draft' && (
@@ -265,36 +306,35 @@ export default function CommissionReviewClient({
                   {loadingLines ? (
                     <div className="py-8 text-center text-sm text-gray-400">Loading deal breakdown...</div>
                   ) : dealLines.length === 0 ? (
-                    <div className="py-8 text-center text-sm text-gray-400">
-                      No deal lines found. Re-run Calculate & Save to generate deal-level data.
-                    </div>
+                    <div className="py-8 text-center text-sm text-gray-400">No deal lines. Re-run Calculate &amp; Save to generate deal-level data.</div>
                   ) : (
                     <div>
-                      {/* Commission summary banner for Type 2 / Type 3 */}
                       {calc.commission_type === 'type2' && (
                         <div className="flex items-center gap-6 px-5 py-3 bg-purple-50 border-b border-purple-100 text-sm">
                           <span className="text-purple-700 font-semibold">Type 2 — Threshold Margin</span>
                           <span className="text-gray-600">Total margin: <strong>{formatEuro(calc.total_margin)}</strong></span>
-                          <span className="text-gray-600">Commission base (above threshold): <strong>{formatEuro(calc.commission_base)}</strong></span>
+                          <span className="text-gray-600">Commission base: <strong>{formatEuro(calc.commission_base)}</strong></span>
                           <span className="text-green-700 font-bold ml-auto">Payable: {formatEuro(calc.total_payable)}</span>
                         </div>
                       )}
                       {calc.commission_type === 'type3' && (
                         <div className="flex items-center gap-6 px-5 py-3 bg-green-50 border-b border-green-100 text-sm">
                           <span className="text-green-700 font-semibold">Type 3 — Annual Target</span>
-                          <span className="text-gray-600">Quarter margin: <strong>{formatEuro(calc.total_margin)}</strong></span>
+                          <span className="text-gray-600">Quarter: <strong>{formatEuro(calc.total_margin)}</strong></span>
                           <span className="text-gray-600">YTD: <strong>{formatEuro(calc.cumulative_margin_ytd ?? 0)}</strong> vs <strong>{formatEuro(calc.cumulative_target_ytd ?? 0)}</strong></span>
                           <span className={'font-bold ml-auto ' + (calc.quarterly_bonus > 0 ? 'text-green-700' : 'text-red-600')}>
-                            Bonus: {formatEuro(calc.quarterly_bonus)} {calc.quarterly_bonus > 0 ? '(target met)' : '(target not met)'}
+                            Bonus: {formatEuro(calc.quarterly_bonus)}
                           </span>
                         </div>
                       )}
 
-                      {/* Export button */}
                       <div className="flex items-center justify-between px-5 py-2.5 border-b border-gray-200 bg-white">
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{dealLines.length} deals</p>
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{dealLines.length} deals</p>
+                          {isType1 && <p className="text-xs text-gray-400 mt-0.5">Click Business Type to override new/existing classification, then re-run Calculate &amp; Save</p>}
+                        </div>
                         <button onClick={() => expandedCalc && exportToCsv(dealLines, expandedCalc)}
-                          className="flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:text-brand-700 border border-brand-300 rounded-lg px-3 py-1.5 hover:bg-brand-50 transition-colors">
+                          className="flex items-center gap-1.5 text-xs font-semibold text-brand-600 border border-brand-300 rounded-lg px-3 py-1.5 hover:bg-brand-50 transition-colors">
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                           </svg>
@@ -302,7 +342,6 @@ export default function CommissionReviewClient({
                         </button>
                       </div>
 
-                      {/* Deal table */}
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead>
@@ -317,22 +356,24 @@ export default function CommissionReviewClient({
                               {isType1 && <th className="text-right px-3 py-2.5">Pre-Burden</th>}
                               {isType1 && <th className="text-right px-3 py-2.5">Burden</th>}
                               {isType1 && <th className="text-right px-3 py-2.5">Total Cost</th>}
-                              <th className="text-right px-3 py-2.5 text-gray-600">Margin</th>
+                              <th className="text-right px-3 py-2.5">Margin</th>
                               {isType1 && <th className="text-right px-3 py-2.5">Rate</th>}
-                              {isType1 && <th className="text-right px-4 py-2.5 text-gray-600">Commission</th>}
+                              {isType1 && <th className="text-right px-4 py-2.5">Commission</th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100">
                             {dealLines.map((l) => (
                               <tr key={l.id} className="bg-gray-50 hover:bg-white">
                                 <td className="px-4 py-2 font-medium text-gray-800 max-w-[120px]">
-                                  <span className="truncate block" title={l.company}>{l.company}</span>
+                                  <span className="truncate block">{l.company}</span>
                                 </td>
                                 <td className="px-4 py-2 text-gray-600 max-w-[180px]">
-                                  <span className="truncate block" title={l.opportunity_name}>{l.opportunity_name}</span>
+                                  <span className="truncate block">{l.opportunity_name}</span>
                                 </td>
                                 <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{formatDate(l.closed_date)}</td>
-                                <td className="px-3 py-2 whitespace-nowrap text-gray-600">{fmtBiz(l.business_type)}</td>
+                                <td className="px-3 py-2 whitespace-nowrap">
+                                  <BusinessTypeCell line={l} onUpdated={handleClassificationUpdate} />
+                                </td>
                                 <td className="px-3 py-2 whitespace-nowrap text-gray-600">{fmtCat(l.commission_category)}</td>
                                 <td className="px-3 py-2 text-right tabular-nums text-gray-700">{formatEuro(l.revenue)}</td>
                                 <td className="px-3 py-2 text-right tabular-nums text-gray-600">{formatEuro(l.direct_cost)}</td>
