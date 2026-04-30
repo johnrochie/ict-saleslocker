@@ -2,15 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { formatEuro, formatCompact, formatPercent, formatDate } from '@/lib/utils/formatting'
-
-const SALES_TEAM = [
-  'Maciejska, Barbara',
-  'Conboy, John',
-  'Dowdall, James',
-  "O'Hora, Evan",
-  'Roche, John',
-  'Taylor, Jamie',
-]
+import { SALES_TEAM_KEYS } from '@/lib/config'
 
 function repDisplay(name: string): string {
   return name.includes(',') ? name.split(',').map(s => s.trim()).reverse().join(' ') : name
@@ -90,7 +82,7 @@ function DealTable({ deals, dateField, dateLabel, showRep }: {
                 {showRep && <td className="py-2 text-gray-500 whitespace-nowrap">{repDisplayFromDeal(d.account_manager, d.opportunity_owner)}</td>}
                 <td className="py-2 text-right font-semibold text-gray-900 whitespace-nowrap">{formatCompact(d.revenue_total)}</td>
                 <td className="py-2 text-right text-gray-600 whitespace-nowrap">{formatPercent(d.gross_margin_pct, 1)}</td>
-                <td className="py-2 text-right text-gray-500 whitespace-nowrap">{formatDate((d as Record<string, string | null>)[dateField])}</td>
+                <td className="py-2 text-right text-gray-500 whitespace-nowrap">{formatDate((d as unknown as Record<string, string | null>)[dateField])}</td>
               </tr>
             ))}
           </tbody>
@@ -199,7 +191,7 @@ export default function WeeklyReportClient() {
   const [meetings, setMeetings]       = useState<Meeting[]>([])
   const [csvLoaded, setCsvLoaded]     = useState(false)
   const [selectedRep, setSelectedRep] = useState<string>('all')
-  const [repOrder, setRepOrder]       = useState<string[]>(SALES_TEAM)
+  const [repOrder, setRepOrder]       = useState<string[]>(SALES_TEAM_KEYS)
   const [dragIdx, setDragIdx]         = useState<number | null>(null)
 
   const loadData = useCallback(async () => {

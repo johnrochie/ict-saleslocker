@@ -2,15 +2,21 @@
 
 import { useEffect } from 'react'
 
-interface LeadershipClientProps {
-  winsData: Record<string, string>[]
-  pipeData: Record<string, string>[]
+interface CategoryTarget {
+  category_name: string; gl_code: string | null
+  annual_revenue_target: number; is_framework: boolean; sort_order: number
 }
 
-export default function LeadershipClient({ winsData, pipeData }: LeadershipClientProps) {
+interface LeadershipClientProps {
+  winsData:        Record<string, string>[]
+  pipeData:        Record<string, string>[]
+  categoryTargets: CategoryTarget[]
+}
+
+export default function LeadershipClient({ winsData, pipeData, categoryTargets }: LeadershipClientProps) {
   useEffect(() => {
     // Inject data into window before scripts load
-    ;(window as any).__LEADERSHIP_DATA__ = { wins: winsData, pipe: pipeData }
+    ;(window as any).__LEADERSHIP_DATA__ = { wins: winsData, pipe: pipeData, categoryTargets }
 
     // Load Chart.js then leadership JS
     const loadScript = (src: string, onload?: () => void) => {
@@ -257,6 +263,7 @@ export default function LeadershipClient({ winsData, pipeData }: LeadershipClien
           </div>
         </div>
 
+ 
         <footer style={{textAlign:'center',padding:'16px',fontSize:'.62rem',color:'var(--muted)'}}>
           ICT Services &mdash; Sales Leadership Report &mdash; <span id="footerDate"></span>
         </footer>

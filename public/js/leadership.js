@@ -130,7 +130,7 @@ function buildDashboard(){
   const pipeCats=groupByCat(pipeData);
   let html='';
   if(!winsRaw||!pipeRaw){ const miss=!winsRaw?'Closed/Won':'Active Pipeline'; html+=`<div class="partial-alert">ℹ️ Partial view — load the <strong>${miss}</strong> CSV above for the complete dashboard.</div>`; }
-  html+=buildKPIs(wTotal,wGP,wCount,pTotal,pCount,wAvg,pAvg);
+  html+=buildKPIs(wTotal,wGP,wCount,pTotal,pCount,wAvg,pAvg); html+=buildCategoryTargets();
   const _p=getPeriod();
   const _fmtD=d=>d?d.toLocaleDateString('en-IE',{day:'2-digit',month:'short',year:'numeric'}):null;
   const _periodLabel=(_p.from||_p.to)?' ('+ [_fmtD(_p.from),_fmtD(_p.to)].filter(Boolean).join(' → ')+')':'';
@@ -231,6 +231,100 @@ function resetAll(){
   const ca=document.getElementById('contentArea'); if(ca) ca.innerHTML=`<div class="wrapper"><div class="placeholder"><h2>Drop your CRM exports into the bar above</h2><p>Load the Closed/Won CSV and the Active Pipeline CSV.</p></div></div>`;
   const br=document.getElementById('btnReset'); if(br) br.style.display='none';
   const gl=document.getElementById('genLabel'); if(gl) gl.textContent='';
+}
+
+// Maps normalised Autotask category names -> GL category names in category_revenue_targets
+const NORM_TO_GL = {
+  'Hardware Sale':'Hardware Sales','Hardware Sales':'Hardware Sales',
+  'Software Sale':'Software Sales','Software Sales':'Software Sales',
+  'Annual Maintenance':'Annual Maintenance',
+  'Dedicated Resources':'Dedicated Resources',
+  'Reseller Warranty':'Reseller Warranty',
+  'Managed Services':'MSP','Managed Services- Account Mgmt':'MSP','Managed Services Account Mgmt':'MSP',
+  'Storage & Logistics':'Storage & Logistics',
+  'Deployments & Projects':'Deployment & Projects','Deployment & Projects':'Deployment & Projects',
+  'Projects':'Deployment & Projects','Professional Services':'Deployment & Projects',
+  'Strategic Sales':'Strategic Sales',
+  'Dispatch Services':'Dispatch Services','Dispatch':'Dispatch Services','Break-Fix':'Dispatch Services',
+  'Customer Rebate':'Customer Rebate',
+  'Reseller Services':'Reseller Services / General','Reseller Services / General':'Reseller Services / General',
+  'DOJ Tender Sales':'DOJ',
+};
+
+function glCat(autotaskNorm){ return NORM_TO_GL[autotaskNorm] || null; }
+
+function buildCategoryTargets(){
+  const targets = window.__LEADERSHIP_DATA__ && window.__LEADERSHIP_DATA__.categoryTargets;
+  if (!targets || !targets.length) return '';
+
+  // Sum won revenue by GL category from winsData (current period)
+  const wonByGl = {};
+  winsData.forEach(d => {
+    const norm = normCat(d['Opportunity Category']);
+    const gl   = glCat(norm);
+    if (!gl) return;
+    if (!wonByGl[gl]) wonByGl[gl] = 0;
+    wonByGl[gl] += parseEuro(d['Revenue (Total)']);
+  });
+
+  const year     = new Date().getFullYear();
+  const products = targets.filter(t => !t.is_framework);
+  const fworks   = targets.filter(t => t.is_framework);
+
+  function targetRow(t){
+    const annual  = t.annual_revenue_target || 0;
+    const actual  = wonByGl[t.category_name] || 0;
+    const pct     = annual > 0 ? Math.min(100, actual / annual * 100) : 0;
+    const barCol  = pct >= 66 ? '#16a34a' : pct >= 33 ? '#d97706' : '#dc2626';
+    const txtCol  = pct >= 66 ? 'var(--win)' : pct >= 33 ? 'var(--amber)' : 'var(--risk)';
+    const glLabel = t.gl_code ? `<span style="font-size:.6rem;color:var(--muted);margin-left:4px;">${t.gl_code}</span>` : '';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);">
+      <div style="width:190px;flex-shrink:0;font-size:.76rem;font-weight:600;color:var(--dark);">${t.category_name}${glLabel}</div>
+      <div style="flex:1;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;">
+        <div style="height:100%;width:${pct.toFixed(1)}%;background:${barCol};border-radius:3px;"></div>
+      </div>
+      <div style="width:90px;text-align:right;font-size:.76rem;font-weight:700;font-variant-numeric:tabular-nums;color:var(--dark);">${winsRaw?fmtE(actual):'—'}</div>
+      <div style="width:90px;text-align:right;font-size:.72rem;color:var(--muted);">${fmtE(annual)}</div>
+      <div style="width:42px;text-align:right;font-size:.72rem;font-weight:700;color:${txtCol};">${winsRaw?pct.toFixed(0)+'%':'—'}</div>
+    </div>`;
+  }
+
+  const hdr = `<div style="display:flex;align-items:center;gap:10px;padding:0 0 8px;border-bottom:2px solid var(--border);margin-bottom:4px;">
+    <div style="width:190px;flex-shrink:0;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);">Category</div>
+    <div style="flex:1;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);">Progress (won vs annual target)</div>
+    <div style="width:90px;text-align:right;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);">Won YTD</div>
+    <div style="width:90px;text-align:right;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);">Annual Target</div>
+    <div style="width:42px;text-align:right;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);">%</div>
+  </div>`;
+
+  const prodRows  = products.map(targetRow).join('');
+  const fworkRows = fworks.map(targetRow).join('');
+
+  const annualProdTotal  = products.reduce((s,t) => s + (t.annual_revenue_target||0), 0);
+  const annualFworkTotal = fworks.reduce((s,t)   => s + (t.annual_revenue_target||0), 0);
+  const wonProdTotal     = products.reduce((s,t)  => s + (wonByGl[t.category_name]||0), 0);
+
+  return `<div class="section">
+    <div class="section-hdr">
+      <div class="section-hdr-left">
+        <span class="section-icon">🎯</span>
+        <div>
+          <div class="section-title">${year} Revenue Targets by Category</div>
+          <div class="section-meta">Annual targets vs won revenue in loaded period &nbsp;&middot;&nbsp; Product lines: ${fmtE(annualProdTotal)} &nbsp;&middot;&nbsp; Frameworks: ${fmtE(annualFworkTotal)}</div>
+        </div>
+      </div>
+      <div style="font-size:.8rem;font-weight:700;color:var(--muted);">${winsRaw?fmtE(wonProdTotal)+' won':'Load wins CSV'}</div>
+    </div>
+    <div class="section-body">
+      <p style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:6px;">Product Lines</p>
+      ${hdr}${prodRows}
+      <p style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:16px 0 6px;">Framework Accounts</p>
+      ${hdr}${fworkRows}
+      <p style="font-size:.62rem;color:var(--muted);margin-top:10px;font-style:italic;">
+        Won revenue is from the date range loaded above. OGP/Garda framework actuals may differ from CRM data.
+      </p>
+    </div>
+  </div>`;
 }
 
 /* Auto-init: use Supabase data if available, otherwise set up date defaults */
