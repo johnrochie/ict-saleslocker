@@ -22,14 +22,20 @@ export default async function TargetsSettingsPage() {
   const { data: profile } = await admin.from('profiles').select('role').eq('id', user.id).single()
   if (profile?.role !== 'admin') redirect('/dashboard/targets')
 
-  const { data: companyTargets } = await admin.from('company_targets').select('*').order('year').order('quarter_num')
-  const { data: repTargets }     = await admin.from('rep_targets').select('*').order('year').order('quarter_num').order('display_name')
+  const { data: companyTargets }  = await admin.from('company_targets').select('*').order('year').order('quarter_num')
+  const { data: repTargets }      = await admin.from('rep_targets').select('*').order('year').order('quarter_num').order('display_name')
+  const { data: categoryTargets } = await admin
+    .from('category_revenue_targets')
+    .select('id, year, category_name, gl_code, annual_revenue_target, is_framework, sort_order')
+    .order('year')
+    .order('sort_order')
 
   return (
     <TargetsSettingsClient
       companyTargets={companyTargets || []}
       repTargets={repTargets || []}
       reps={REPS}
+      categoryTargets={categoryTargets || []}
       currentUserEmail={user.email || ''}
     />
   )

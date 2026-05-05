@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
   })
 }
 
-// Upsert company or rep target
+// Upsert company, rep, or category target
 export async function POST(request: NextRequest) {
   const ctx = await checkAccess('admin')
   if (!ctx) return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
@@ -148,5 +148,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ target: result })
   }
 
-  return NextResponse.json({ error: 'type must be company or rep' }, { status: 400 })
+  if (type === 'category') {
+    const { year, category_name, annual_revenue_target } = data
+    const { data: result, error } = await ctx.admin
+      .from('category_revenue_targets')
+      .upsert(
+        { year, category_name, annual_revenue_target: annual_revenue_target ?? 0, updated_by: ctx.user.email },
+        { onConflict: 'year,category_name' }
+      )
+      .select().single()
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ target: result })
+  }
+
+  return NextResponse.json({ error: 'type must be company, rep, or category' }, { status: 400 })
 }
