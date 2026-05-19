@@ -181,6 +181,7 @@ function toggle(bodyId,arrowId){ const body=document.getElementById(bodyId); con
 function buildCatCompare(){ return `<div class="section"><div class="section-hdr"><div class="section-hdr-left"><span class="section-icon">📊</span><div><div class="section-title">Category Comparison — Wins vs Pipeline</div><div class="section-meta">Where revenue has landed vs where future value sits</div></div></div></div><div class="section-body"><div class="chart-wrap" style="height:260px;"><canvas id="catChart"></canvas></div></div></div>`; }
 
 function renderCatChart(winCats,pipeCats){
+  if(typeof Chart==="undefined") return; // Chart.js not loaded (CDN unavailable)
   const allCats=[...new Set([...Object.keys(winCats),...Object.keys(pipeCats)])].sort((a,b)=>{ const tA=(winCats[a]?.total||0)+(pipeCats[a]?.total||0); const tB=(winCats[b]?.total||0)+(pipeCats[b]?.total||0); return tB-tA; });
   const el=document.getElementById('catChart'); if(!el) return;
   if(catChart) catChart.destroy();

@@ -15,30 +15,38 @@ interface LeadershipClientProps {
 
 export default function LeadershipClient({ winsData, pipeData, categoryTargets }: LeadershipClientProps) {
   useEffect(() => {
-    // Inject data into window before scripts load
+    // Inject data into window so leadership.js can read it
     ;(window as any).__LEADERSHIP_DATA__ = { wins: winsData, pipe: pipeData, categoryTargets }
 
-    // Load Chart.js then leadership JS
-    const loadScript = (src: string, onload?: () => void) => {
+    const cleanup = () => { delete (window as any).__LEADERSHIP_DATA__ }
+
+    // If leadership.js already ran (re-navigation), call buildDashboard directly
+    if (typeof (window as any).buildDashboard === 'function') {
+      (window as any).buildDashboard()
+      return cleanup
+    }
+
+    // First load — load Chart.js from CDN, then leadership.js
+    // onerror fallback ensures leadership.js loads even if CDN is blocked (chart section will be skipped)
+    const loadScript = (src: string, onload?: () => void, onerror?: () => void) => {
       const existing = document.querySelector(`script[src="${src}"]`)
       if (existing) { onload?.(); return }
       const s = document.createElement('script')
       s.src = src
       s.onload = onload || null
+      s.onerror = onerror || null
       document.head.appendChild(s)
     }
 
+    const loadLeadershipJs = () => loadScript('/js/leadership.js')
+
     loadScript(
       'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js',
-      () => {
-        loadScript('/js/leadership.js')
-      }
+      loadLeadershipJs,
+      loadLeadershipJs
     )
 
-    return () => {
-      // Clean up global data on unmount
-      delete (window as any).__LEADERSHIP_DATA__
-    }
+    return cleanup
   }, [winsData, pipeData])
 
   const recordCount = winsData.length + pipeData.length
@@ -262,10 +270,8 @@ export default function LeadershipClient({ winsData, pipeData, categoryTargets }
             </div>
           </div>
         </div>
-
- 
-        <footer style={{textAlign:'center',padding:'16px',fontSize:'.62rem',color:'var(--muted)'}}>
-          ICT Services &mdash; Sales Leadership Report &mdash; <span id="footerDate"></span>
+        <footer style={{textAlign:'center', padding:'16px', color:'#94a3b8', fontSize:'12px', borderTop:'1px solid #e2e8f0', marginTop:'24px'}}>
+          <span id="footerDate"></span>
         </footer>
       </div>
     </>

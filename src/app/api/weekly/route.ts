@@ -1,15 +1,16 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
 import { SALES_TEAM_KEYS, isSalesTeamDeal, weekBounds } from '@/lib/config'
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const admin = createAdminSupabaseClient()
-  const lastWeek = weekBounds(-1)
-  const thisWeek = weekBounds(0)
+  const offset   = parseInt(new URL(request.url).searchParams.get('offset') || '0')
+  const admin    = createAdminSupabaseClient()
+  const lastWeek = weekBounds(-1 + offset)
+  const thisWeek = weekBounds(offset)
 
   const [
     { data: closedDeals },

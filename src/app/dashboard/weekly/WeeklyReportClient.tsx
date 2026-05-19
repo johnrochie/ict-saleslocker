@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Papa from 'papaparse'
 import { formatEuro, formatCompact, formatPercent, formatDate } from '@/lib/utils/formatting'
 import { SALES_TEAM_KEYS } from '@/lib/config'
 
@@ -193,15 +194,26 @@ export default function WeeklyReportClient() {
   const [selectedRep, setSelectedRep] = useState<string>('all')
   const [repOrder, setRepOrder]       = useState<string[]>(SALES_TEAM_KEYS)
   const [dragIdx, setDragIdx]         = useState<number | null>(null)
+  const [weekOffset, setWeekOffset]   = useState(0)
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (offset: number) => {
     setLoading(true)
-    const res = await fetch('/api/weekly')
+    const res = await fetch(`/api/weekly?offset=${offset}`)
     setData(await res.json())
     setLoading(false)
   }, [])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => { loadData(weekOffset) }, [loadData, weekOffset])
+
+  function goToPrevWeek() {
+    setWeekOffset(o => o - 1)
+    setMeetings([]); setCsvLoaded(false)
+  }
+  function goToNextWeek() {
+    if (weekOffset >= 0) return
+    setWeekOffset(o => o + 1)
+    setMeetings([]); setCsvLoaded(false)
+  }
 
   function handleDragStart(i: number) { setDragIdx(i) }
   function handleDragOver(e: React.DragEvent, i: number) {
@@ -215,43 +227,36 @@ export default function WeeklyReportClient() {
   }
   function handleDragEnd() { setDragIdx(null) }
 
-  function parseMeetingsCsv(text: string) {
-    const lines = text.replace(/^﻿/, '').split('\n')
-    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''))
-    const rows: Meeting[] = []
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim()
-      if (!line) continue
-      const values: string[] = []; let current = '', inQ = false
-      for (let j = 0; j < line.length; j++) {
-        const c = line[j]
-        if (c === '"') { inQ = !inQ }
-        else if (c === ',' && !inQ) { values.push(current.trim()); current = '' }
-        else { current += c }
-      }
-      values.push(current.trim())
-      const row: Record<string, string> = {}
-      headers.forEach((h, idx) => { row[h] = (values[idx] || '').replace(/^"|"$/g, '').trim() })
-      const actionType = row['Action Type'] || ''
-      if (!['Meeting', 'Account Management Meeting'].some(t => actionType.includes(t))) continue
-      const rawDate = row['Start Date'] || ''
-      const parts = rawDate.split('/')
-      const sortableDate = parts.length === 3 ? `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}` : rawDate
-      rows.push({
-        classification: row['Classification'] || '', company: row['Company'] || '',
-        action_type: actionType, start_date: sortableDate, start_time: row['Start Time'] || '',
-        description: row['Description'] || '', contact: row['Contact'] || '',
-        opportunity: row['Opportunity'] || '', assigned_to: row['Assigned To Resource'] || '',
-      })
-    }
-    rows.sort((a, b) => a.start_date.localeCompare(b.start_date))
-    setMeetings(rows); setCsvLoaded(true)
-  }
-
   function readCsvFile(file: File) {
-    const reader = new FileReader()
-    reader.onload = e => parseMeetingsCsv(e.target?.result as string)
-    reader.readAsText(file, 'UTF-8')
+    Papa.parse<Record<string, string>>(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: ({ data }) => {
+        const rows: Meeting[] = []
+        for (const row of data) {
+          const actionType = row['Action Type'] || ''
+          if (!['Meeting', 'Account Management Meeting'].some(t => actionType.includes(t))) continue
+          const rawDate = row['Start Date'] || ''
+          const parts = rawDate.split('/')
+          const sortableDate = parts.length === 3
+            ? `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`
+            : rawDate
+          rows.push({
+            classification: row['Classification'] || '',
+            company:        row['Company']        || '',
+            action_type:    actionType,
+            start_date:     sortableDate,
+            start_time:     row['Start Time']              || '',
+            description:    row['Description']             || '',
+            contact:        row['Contact']                 || '',
+            opportunity:    row['Opportunity']             || '',
+            assigned_to:    row['Assigned To Resource']    || '',
+          })
+        }
+        rows.sort((a, b) => a.start_date.localeCompare(b.start_date))
+        setMeetings(rows); setCsvLoaded(true)
+      },
+    })
   }
 
   if (loading || !data) {
@@ -272,12 +277,32 @@ export default function WeeklyReportClient() {
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Weekly Sales Report</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Week of {data.thisWeek.label}</p>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {weekOffset === 0 ? 'Current week' : `${Math.abs(weekOffset)} week${Math.abs(weekOffset) !== 1 ? 's' : ''} ago`}
+            {' — '}{data.thisWeek.label}
+          </p>
         </div>
-        <button onClick={loadData} className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded-lg px-3 py-1.5">Refresh</button>
+        <div className="flex items-center gap-2">
+          {weekOffset < 0 && (
+            <button onClick={() => { setWeekOffset(0); setMeetings([]); setCsvLoaded(false) }}
+              className="text-xs text-brand-600 border border-brand-300 rounded-lg px-3 py-1.5 hover:bg-brand-50">
+              Back to current
+            </button>
+          )}
+          <button onClick={goToPrevWeek}
+            className="text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg px-2.5 py-1.5 hover:bg-gray-50" title="Previous week">
+            &#8592;
+          </button>
+          <button onClick={goToNextWeek} disabled={weekOffset >= 0}
+            className="text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg px-2.5 py-1.5 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed" title="Next week">
+            &#8594;
+          </button>
+          <button onClick={() => loadData(weekOffset)}
+            className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded-lg px-3 py-1.5">Refresh</button>
+        </div>
       </div>
 
-      {/* Rep filter — draggable to reorder */}
+      {/* Rep filter -- draggable to reorder */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs font-medium text-gray-400 uppercase tracking-wide mr-1">View:</span>
         <button onClick={() => setSelectedRep('all')}

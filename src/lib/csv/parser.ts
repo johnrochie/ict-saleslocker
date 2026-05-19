@@ -93,8 +93,10 @@ function normaliseStatus(row: AutotaskCsvRow): NormalisedStatus {
   const stage  = (row.Stage  || '').trim()
   const accountManager = (row['Account Manager'] || '').trim()
 
-  // Portal, OGP entries — grouped separately
-  if (accountManager === 'Portal, OGP') return 'portal'
+  // Portal, OGP and retail reps — excluded from main sales reporting
+  const opportunityOwner = (row['Opportunity Owner'] || '').trim()
+  const EXCLUDED_REPS = ['Portal, OGP', 'Desmond, Tom', 'Ganly, Peter']
+  if (EXCLUDED_REPS.includes(accountManager) || EXCLUDED_REPS.includes(opportunityOwner)) return 'portal'
 
   // Won
   if (status === 'Closed' || status === 'Implemented') return 'won'
@@ -311,15 +313,8 @@ export async function ingestCsv(
     status:         result.errors.length === 0
       ? 'success'
       : result.rows_inserted + result.rows_updated > 0
-        ? 'partial'
-        : 'failed',
+      ? 'partial' : 'error',
   })
-
-  result.status = result.errors.length === 0
-    ? 'success'
-    : result.rows_inserted + result.rows_updated > 0
-      ? 'partial'
-      : 'failed'
 
   return result
 }
