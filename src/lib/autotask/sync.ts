@@ -56,10 +56,11 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   console.log(`[autotask/sync] Starting ${syncType} sync. Triggered by: ${triggeredBy}`)
 
   // ── 2. Fetch opportunities (required — abort if this fails) ─
-  // Full sync: use createDate >= 2000 to get all opps (id-based filters cause 500 errors)
+  // Full sync: use lastActivityDate >= 2000 — id and createDate filters cause Autotask 500 errors.
+  // lastActivityDate is the only field confirmed to work for Opportunities filtering.
   const oppFilter = lastSyncAt
     ? [{ op: 'gte', field: 'lastActivityDate', value: lastSyncAt }]
-    : [{ op: 'gte', field: 'createDate', value: '2000-01-01T00:00:00.000Z' }]
+    : [{ op: 'gte', field: 'lastActivityDate', value: '2000-01-01T00:00:00.000Z' }]
 
   const rawOpps = await client.queryAll<AutotaskOpportunity>('Opportunities', oppFilter)
   console.log(`[autotask/sync] Fetched ${rawOpps.length} opportunities`)
@@ -191,6 +192,11 @@ function countResults(
   data.forEach(rec => {
     const diffMs = Math.abs(
       new Date(rec.updated_at).getTime() - new Date(rec.created_at).getTime()
+    )
+    if (diffMs < 2000) result.rows_inserted++
+    else               result.rows_updated++
+  })
+}
     )
     if (diffMs < 2000) result.rows_inserted++
     else               result.rows_updated++
