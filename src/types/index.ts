@@ -12,9 +12,10 @@ export type NormalisedStatus =
 
 export type UserRole = 'admin' | 'sales_manager' | 'sales_rep' | 'read_only'
 
-// ── Opportunity ──────────────────────────────────────────────
+// -- Opportunity ---------------------------------------------
 export interface Opportunity {
   id: string
+  autotask_id: number | null   // Set by API sync; null for CSV-imported records
   composite_key: string
 
   company: string
@@ -57,14 +58,14 @@ export interface Opportunity {
   updated_at: string
 }
 
-// ── Stage Weight ─────────────────────────────────────────────
+// -- Stage Weight --------------------------------------------
 export interface StageWeight {
   stage: string
   weight_pct: number
   display_order: number
 }
 
-// ── Profile ──────────────────────────────────────────────────
+// -- Profile -------------------------------------------------
 export interface Profile {
   id: string
   email: string | null
@@ -75,7 +76,7 @@ export interface Profile {
   updated_at: string
 }
 
-// ── Import Log ───────────────────────────────────────────────
+// -- Import Log ----------------------------------------------
 export interface ImportLog {
   id: string
   imported_at: string
@@ -90,7 +91,7 @@ export interface ImportLog {
   status: 'success' | 'partial' | 'failed'
 }
 
-// ── Dashboard Metrics ────────────────────────────────────────
+// -- Dashboard Metrics ---------------------------------------
 export interface DashboardMetrics {
   pipeline_revenue: number
   pipeline_count: number
@@ -100,13 +101,13 @@ export interface DashboardMetrics {
   lost_revenue: number
   lost_count: number
   total_gross_profit: number
-  win_rate: number           // percentage
+  win_rate: number
   overdue_count: number
-  stale_count: number        // no activity 14+ days
-  weighted_pipeline: number  // stage-weighted forecast value
+  stale_count: number
+  weighted_pipeline: number
 }
 
-// ── CSV Row (raw parsed from Autotask export) ────────────────
+// -- CSV Row (raw parsed from Autotask export) ---------------
 export interface AutotaskCsvRow {
   Company: string
   Opportunity: string
@@ -135,7 +136,7 @@ export interface AutotaskCsvRow {
   Rating: string
 }
 
-// ── Import Result ────────────────────────────────────────────
+// -- Import Result -------------------------------------------
 export interface ImportResult {
   rows_processed: number
   rows_inserted: number

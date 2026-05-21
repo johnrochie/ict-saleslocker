@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/autotask/sync",
+      "schedule": "0 * * * *"
+    }
+  ]
+}

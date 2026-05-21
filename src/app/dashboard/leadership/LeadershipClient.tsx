@@ -11,9 +11,10 @@ interface LeadershipClientProps {
   winsData:        Record<string, string>[]
   pipeData:        Record<string, string>[]
   categoryTargets: CategoryTarget[]
+  reportTitle?:    string
 }
 
-export default function LeadershipClient({ winsData, pipeData, categoryTargets }: LeadershipClientProps) {
+export default function LeadershipClient({ winsData, pipeData, categoryTargets, reportTitle }: LeadershipClientProps) {
   useEffect(() => {
     // Inject data into window so leadership.js can read it
     ;(window as any).__LEADERSHIP_DATA__ = { wins: winsData, pipe: pipeData, categoryTargets }
@@ -90,6 +91,35 @@ export default function LeadershipClient({ winsData, pipeData, categoryTargets }
         .lb-msg{margin-left:auto;font-size:.7rem;color:var(--muted);white-space:nowrap;flex-shrink:0;}
         .lb-msg.ok{color:var(--win);font-weight:600;}
         .lb-msg.partial{color:var(--amber);font-weight:600;}
+        .fc-body{padding:0 0 8px;}
+        .fc-qtr{border-bottom:1px solid var(--border);}
+        .fc-qtr:last-child{border-bottom:none;}
+        .fc-qtr-hdr{display:flex;align-items:center;gap:10px;padding:12px 20px;cursor:pointer;background:var(--bg);user-select:none;flex-wrap:wrap;}
+        .fc-qtr-hdr:hover{background:#e8edf3;}
+        .fc-qtr-label{font-size:.85rem;font-weight:700;color:var(--dark);min-width:70px;}
+        .fc-qtr-meta{font-size:.72rem;color:var(--muted);flex:1;}
+        .fc-qtr-val{font-size:.9rem;font-weight:700;color:var(--pipe);min-width:80px;text-align:right;}
+        .fc-month{border-top:1px solid var(--border);}
+        .fc-month-hdr{display:flex;align-items:center;gap:10px;padding:9px 20px 9px 36px;cursor:pointer;user-select:none;}
+        .fc-month-hdr:hover{background:var(--pipe-bg);}
+        .fc-month-name{font-size:.8rem;font-weight:600;color:var(--slate);min-width:120px;}
+        .fc-month-meta{font-size:.7rem;color:var(--muted);flex:1;}
+        .fc-month-val{font-size:.8rem;font-weight:600;color:var(--pipe);min-width:80px;text-align:right;}
+        .fc-overdue{border-bottom:1px solid var(--border);}
+        .fc-overdue-hdr{display:flex;align-items:center;gap:10px;padding:12px 20px;cursor:pointer;background:#fff5f5;user-select:none;}
+        .fc-overdue-hdr:hover{background:#fee2e2;}
+        .fc-od-icon{font-size:.9rem;}
+        .fc-table{width:100%;font-size:.8rem;margin:0;}
+        .fc-table thead tr{background:var(--bg);}
+        .fc-table th,.fc-table td{padding:6px 10px 6px 20px;}
+        .fc-table th:first-child,.fc-table td:first-child{padding-left:36px;}
+        .fc-co{font-weight:600;color:var(--dark);max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .fc-opp{max-width:220px;color:var(--slate);}
+        .fc-rep{font-size:.75rem;color:var(--muted);white-space:nowrap;}
+        .fc-val{font-weight:600;color:var(--dark);white-space:nowrap;}
+        .stage-lo{background:#fef3c7;color:#92400e;}
+        .stage-mid{background:#dbeafe;color:#1e40af;}
+        .stage-hi{background:#dcfce7;color:#166534;}
         .wrapper{max-width:1400px;margin:0 auto;padding:20px 28px;}
         .placeholder{text-align:center;padding:80px 24px;color:var(--muted);}
         .placeholder h2{font-size:1.2rem;font-weight:700;color:var(--dark);margin-bottom:8px;}
@@ -208,7 +238,7 @@ export default function LeadershipClient({ winsData, pipeData, categoryTargets }
         {/* Top bar */}
         <div className="ld-topbar">
           <div>
-            <h1>ICT Services &nbsp;|&nbsp; <em>Sales Leadership Report</em></h1>
+            <h1>ICT Services &nbsp;|&nbsp; <em>{reportTitle || 'Sales Leadership Report'}</em></h1>
             <p>Live data from SalesLocker &mdash; {recordCount} records loaded &mdash; Wins &amp; Pipeline by Category and Customer</p>
           </div>
           <div className="ld-topbar-right">

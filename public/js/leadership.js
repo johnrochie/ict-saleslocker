@@ -108,7 +108,7 @@ function inPeriod(dateStr,period){
 function processData(){
   const period=getPeriod();
   winsData=(winsRaw||[]).filter(d=>{ if(isTestRow(d)) return false; return inPeriod(d['Closed Date'],period); });
-  pipeData=(pipeRaw||[]).filter(d=>{ if(isTestRow(d)) return false; const status=(d.Status||'').toLowerCase().trim(); const sn=stageNum(d.Stage); if(!(status==='active'&&sn<5)) return false; return inPeriod(d['Create Date'],period); });
+  pipeData=(pipeRaw||[]).filter(d=>{ if(isTestRow(d)) return false; const status=(d.Status||'').toLowerCase().trim(); const sn=stageNum(d.Stage); return (status==='active'&&sn<5); }); // no date filter — pipeline always shows all active deals
   _catColorIdx={};
   const allCats=[...new Set([...winsData,...pipeData].map(d=>normCat(d['Opportunity Category'])))].sort();
   allCats.forEach(c=>catColor(c));
@@ -138,6 +138,7 @@ function buildDashboard(){
   if(pipeRaw) html+=buildSection('pipe','📈','Active Pipeline'+_periodLabel,pTotal,pCount,null,pipeCats);
   if(winsRaw&&pipeRaw) html+=buildCatCompare();
   if(winsRaw||pipeRaw){ html+=`<div class="two-col">`; html+=buildCustomerConc(winCats,pipeCats); html+=`</div>`; }
+  if(pipeRaw) html+=buildForecast();
   if(winsRaw||pipeRaw) html+=buildKeyDeals();
   if(pipeRaw) html+=buildRisks();
   const ca=document.getElementById('contentArea'); if(ca) ca.innerHTML=`<div class="wrapper">${html}</div>`;
@@ -197,6 +198,165 @@ function buildCustomerConc(winCats,pipeCats){
   const maxW=topWin[0]?.[1]?.rev||1; const maxP=topPipe[0]?.[1]?.rev||1;
   function custList(arr,max,colorClass,colorHex){ if(!arr.length) return '<div class="empty-state">No data</div>'; return `<div class="cust-list">${arr.map(([name,v],i)=>`<div class="cust-row"><div class="cust-rank">${i+1}</div><div class="cust-name" title="${name}">${name}</div><div class="cust-bar-track"><div class="cust-bar-fill" style="width:${Math.round(v.rev/max*100)}%;background:${colorHex}"></div></div><div class="cust-rev ${colorClass}">${fmtE(v.rev)}</div><div class="cust-cnt">${v.count}d</div></div>`).join('')}</div>`; }
   return `<div class="section" style="margin-bottom:0"><div class="section-hdr"><div class="section-hdr-left"><span class="section-icon">🏢</span><div><div class="section-title">Top Customers — Wins</div><div class="section-meta">Who drove revenue this period</div></div></div><div class="section-total win-text">${winsRaw?Object.keys(winByCust).length+' customers':'—'}</div></div><div class="section-body">${winsRaw?custList(topWin,maxW,'win-text','rgba(22,163,74,.7)'):'<div class="empty-state">Load wins CSV</div>'}</div></div><div class="section" style="margin-bottom:0"><div class="section-hdr"><div class="section-hdr-left"><span class="section-icon">🏢</span><div><div class="section-title">Top Customers — Pipeline</div><div class="section-meta">Who matters most in the next cycle</div></div></div><div class="section-total pipe-text">${pipeRaw?Object.keys(pipeByCust).length+' customers':'—'}</div></div><div class="section-body">${pipeRaw?custList(topPipe,maxP,'pipe-text','rgba(37,99,235,.6)'):'<div class="empty-state">Load pipeline CSV</div>'}</div></div>`;
+}
+
+
+function buildForecast(){
+  if(!pipeData||!pipeData.length) return '';
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // Quarter label helper
+  function quarterOf(d){ const m=d.getMonth(); const q=Math.floor(m/3)+1; return `Q${q} ${d.getFullYear()}`; }
+  function monthKey(d){ return d.getFullYear()*100+(d.getMonth()+1); }
+  function monthLabel(d){ return d.toLocaleDateString('en-IE',{month:'long',year:'numeric'}); }
+  function quarterKey(d){ const q=Math.floor(d.getMonth()/3)+1; return d.getFullYear()*10+q; }
+
+  // Bucket deals
+  const overdue=[], noDate=[], byQtr={};
+  pipeData.forEach(d=>{
+    const cd=parseDate(d['Projected Close Date']);
+    if(!cd){ noDate.push(d); return; }
+    if(cd<today){ overdue.push(d); return; }
+    const qk=quarterKey(cd), mk=monthKey(cd);
+    if(!byQtr[qk]) byQtr[qk]={ label:quarterOf(cd), months:{}, total:0, count:0 };
+    if(!byQtr[qk].months[mk]) byQtr[qk].months[mk]={ label:monthLabel(cd), deals:[], total:0, count:0 };
+    const rev=parseEuro(d['Revenue (Total)']);
+    byQtr[qk].months[mk].deals.push(d);
+    byQtr[qk].months[mk].total+=rev;
+    byQtr[qk].months[mk].count++;
+    byQtr[qk].total+=rev;
+    byQtr[qk].count++;
+  });
+
+  function dealRow(d){
+    const rev=parseEuro(d['Revenue (Total)']);
+    const rep=d['Account Manager']||d['Opportunity Owner']||'—';
+    const repShort=rep.includes(',')?rep.split(',').map(s=>s.trim()).reverse().join(' '):rep;
+    const sn=stageNum(d.Stage);
+    const stageCls=sn<=2?'stage-badge stage-lo':sn===3?'stage-badge stage-mid':'stage-badge stage-hi';
+    return `<tr>
+      <td class="fc-co">${d.Company||'—'}</td>
+      <td class="fc-opp"><div class="deal-opp-name" title="${d.Opportunity||''}">${d.Opportunity||'—'}</div></td>
+      <td class="fc-rep">${repShort}</td>
+      <td><span class="${stageCls}">${shortStage(d.Stage)}</span></td>
+      <td class="r fc-val">${fmtE(rev)}</td>
+    </tr>`;
+  }
+
+  function monthBlock(mk,mo,qk,idx){
+    const id=`fc-m-${qk}-${mk}`;
+    const rows=mo.deals.sort((a,b)=>parseEuro(b['Revenue (Total)'])-parseEuro(a['Revenue (Total)']))
+      .map(dealRow).join('');
+    return `<div class="fc-month">
+      <div class="fc-month-hdr" onclick="toggle('${id}-b','${id}-a')">
+        <span class="fc-month-name">${mo.label}</span>
+        <span class="fc-month-meta">${mo.count} deal${mo.count!==1?'s':''}</span>
+        <span class="fc-month-val">${fmtE(mo.total)}</span>
+        <span class="acc-arrow" id="${id}-a">▼</span>
+      </div>
+      <div class="acc-body" id="${id}-b">
+        <table class="deal-table fc-table">
+          <thead><tr><th>Company</th><th>Opportunity</th><th>Rep</th><th>Stage</th><th class="r">Value</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  function quarterBlock(qk,qtr){
+    const id=`fc-q-${qk}`;
+    const sortedMonths=Object.entries(qtr.months).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
+    const monthBlocks=sortedMonths.map(([mk,mo],i)=>monthBlock(mk,mo,qk,i)).join('');
+    return `<div class="fc-qtr">
+      <div class="fc-qtr-hdr" onclick="toggle('${id}-b','${id}-a')">
+        <span class="fc-qtr-label">${qtr.label}</span>
+        <span class="fc-qtr-meta">${qtr.count} deal${qtr.count!==1?'s':''} across ${sortedMonths.length} month${sortedMonths.length!==1?'s':''}</span>
+        <span class="fc-qtr-val">${fmtE(qtr.total)}</span>
+        <span class="acc-arrow" id="${id}-a">▼</span>
+      </div>
+      <div class="acc-body open" id="${id}-b">${monthBlocks}</div>
+    </div>`;
+  }
+
+  // Overdue block
+  let overdueHtml='';
+  if(overdue.length){
+    const overdueTotal=overdue.reduce((s,d)=>s+parseEuro(d['Revenue (Total)']),0);
+    const overdueRows=overdue.sort((a,b)=>{
+      const da=parseDate(a['Projected Close Date']), db=parseDate(b['Projected Close Date']);
+      return da&&db?da-db:0;
+    }).map(d=>{
+      const rev=parseEuro(d['Revenue (Total)']);
+      const rep=d['Account Manager']||d['Opportunity Owner']||'—';
+      const repShort=rep.includes(',')?rep.split(',').map(s=>s.trim()).reverse().join(' '):rep;
+      const daysOver=Math.floor((today-parseDate(d['Projected Close Date']))/(86400000));
+      return `<tr class="overdue">
+        <td class="fc-co">${d.Company||'—'}</td>
+        <td class="fc-opp"><div class="deal-opp-name">${d.Opportunity||'—'}<span class="overdue-badge">${daysOver}d overdue</span></div></td>
+        <td class="fc-rep">${repShort}</td>
+        <td><span class="stage-badge">${shortStage(d.Stage)}</span></td>
+        <td class="r fc-val">${fmtE(rev)}</td>
+      </tr>`;
+    }).join('');
+    overdueHtml=`<div class="fc-overdue">
+      <div class="fc-overdue-hdr" onclick="toggle('fc-od-b','fc-od-a')">
+        <span class="fc-od-icon">⚠️</span>
+        <span class="fc-qtr-label" style="color:var(--risk)">Overdue</span>
+        <span class="fc-qtr-meta">${overdue.length} deal${overdue.length!==1?'s':''} past projected close</span>
+        <span class="fc-qtr-val" style="color:var(--risk)">${fmtE(overdue.reduce((s,d)=>s+parseEuro(d['Revenue (Total)']),0))}</span>
+        <span class="acc-arrow" id="fc-od-a">▼</span>
+      </div>
+      <div class="acc-body open" id="fc-od-b">
+        <table class="deal-table fc-table">
+          <thead><tr><th>Company</th><th>Opportunity</th><th>Rep</th><th>Stage</th><th class="r">Value</th></tr></thead>
+          <tbody>${overdueRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  // Quarter blocks sorted chronologically
+  const sortedQtrs=Object.entries(byQtr).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
+  const qtrBlocks=sortedQtrs.map(([qk,qtr])=>quarterBlock(qk,qtr)).join('');
+  const grandTotal=pipeData.reduce((s,d)=>s+parseEuro(d['Revenue (Total)']),0);
+
+  // No date block
+  let noDateHtml='';
+  if(noDate.length){
+    const noDateRows=noDate.map(dealRow).join('');
+    noDateHtml=`<div class="fc-month" style="opacity:.7">
+      <div class="fc-month-hdr" onclick="toggle('fc-nd-b','fc-nd-a')">
+        <span class="fc-month-name" style="color:var(--muted)">No close date</span>
+        <span class="fc-month-meta">${noDate.length} deal${noDate.length!==1?'s':''}</span>
+        <span class="fc-month-val">${fmtE(noDate.reduce((s,d)=>s+parseEuro(d['Revenue (Total)']),0))}</span>
+        <span class="acc-arrow" id="fc-nd-a">▼</span>
+      </div>
+      <div class="acc-body" id="fc-nd-b">
+        <table class="deal-table fc-table">
+          <thead><tr><th>Company</th><th>Opportunity</th><th>Rep</th><th>Stage</th><th class="r">Value</th></tr></thead>
+          <tbody>${noDateRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  return `<div class="section">
+    <div class="section-hdr">
+      <div class="section-hdr-left">
+        <span class="section-icon">📅</span>
+        <div>
+          <div class="section-title">Pipeline Forecast</div>
+          <div class="section-meta">${pipeData.length} active deals &nbsp;·&nbsp; ${sortedQtrs.length} quarter${sortedQtrs.length!==1?'s':''}</div>
+        </div>
+      </div>
+      <div class="section-total pipe-text">${fmtE(grandTotal)}</div>
+    </div>
+    <div class="fc-body">
+      ${overdueHtml}
+      ${qtrBlocks}
+      ${noDateHtml}
+    </div>
+  </div>`;
 }
 
 function buildKeyDeals(){
