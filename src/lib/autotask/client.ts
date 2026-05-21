@@ -116,5 +116,5 @@ export class AutotaskClient {
   }
 }
 
-export const FILTER_ALL: unknown[]    = [{ op: 'gte', field: 'id', value: 0 }]
+export const FILTER_ALL: unknown[]    = [{ op: 'gte', field: 'id', value: 1 }]
 export const FILTER_ACTIVE: unknown[] = [{ op: 'eq',  field: 'isActive', value: true }]

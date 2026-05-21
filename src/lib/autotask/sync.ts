@@ -56,9 +56,10 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   console.log(`[autotask/sync] Starting ${syncType} sync. Triggered by: ${triggeredBy}`)
 
   // ── 2. Fetch opportunities (required — abort if this fails) ─
+  // Full sync: use createDate >= 2000 to get all opps (id-based filters cause 500 errors)
   const oppFilter = lastSyncAt
     ? [{ op: 'gte', field: 'lastActivityDate', value: lastSyncAt }]
-    : FILTER_ALL
+    : [{ op: 'gte', field: 'createDate', value: '2000-01-01T00:00:00.000Z' }]
 
   const rawOpps = await client.queryAll<AutotaskOpportunity>('Opportunities', oppFilter)
   console.log(`[autotask/sync] Fetched ${rawOpps.length} opportunities`)
