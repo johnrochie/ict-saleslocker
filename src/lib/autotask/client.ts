@@ -4,7 +4,6 @@
 
 import type { AutotaskField, AutotaskQueryResponse } from './types'
 
-// Zone URL cached for the lifetime of the serverless invocation
 let cachedBaseUrl: string | null = null
 
 export class AutotaskClient {
@@ -56,7 +55,9 @@ export class AutotaskClient {
     }
 
     const data = await res.json() as { url: string; webUrl?: string }
-    cachedBaseUrl = (data.url ?? data.webUrl ?? '').replace(/\/+$/, '')
+    // Zone URL may or may not include /v1.0 — normalise to always have it
+    const raw = (data.url ?? data.webUrl ?? '').replace(/\/+$/, '')
+    cachedBaseUrl = raw.includes('/v1.0') ? raw : `${raw}/v1.0`
     console.log(`[autotask/client] Base URL: ${cachedBaseUrl}`)
     return cachedBaseUrl
   }
@@ -66,13 +67,13 @@ export class AutotaskClient {
     const res = await fetch(`${base}/${path}`, { headers: this.authHeaders() })
     if (!res.ok) {
       const body = await res.text().catch(() => '')
-      throw new Error(`GET ${base}/${path} → ${res.status}: ${body.slice(0, 300)}`)
+      throw new Error(`GET ${base}/${path} -> ${res.status}: ${body.slice(0, 300)}`)
     }
     return res.json() as Promise<T>
   }
 
   async queryAll<T>(entity: string, filter: unknown[]): Promise<T[]> {
-    const base  = await this.getBaseUrl()
+    const base     = await this.getBaseUrl()
     const items: T[] = []
     const queryUrl = `${base}/${entity}/query`
 
@@ -85,7 +86,7 @@ export class AutotaskClient {
     if (!firstRes.ok) {
       const body = await firstRes.text().catch(() => '')
       throw new Error(
-        `Query ${entity} failed (${firstRes.status}) at ${queryUrl} — ${body.slice(0, 200)}`
+        `Query ${entity} failed (${firstRes.status}) at ${queryUrl} -- ${body.slice(0, 200)}`
       )
     }
 
