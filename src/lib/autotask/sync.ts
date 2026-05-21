@@ -1,14 +1,6 @@
 // ============================================================
 // ICT SalesLocker — Autotask Sync Orchestrator
 // ============================================================
-// Full flow:
-//  1. Determine full vs incremental sync from import_logs
-//  2. Fetch reference data (picklists, resources, companies)
-//  3. Query opportunities (all, or since last successful sync)
-//  4. Transform each opportunity
-//  5. Batch upsert to Supabase (conflict on autotask_id)
-//  6. Log result to import_logs
-// ============================================================
 
 import { AutotaskClient, FILTER_ALL, FILTER_ACTIVE } from './client'
 import { fetchOpportunityPicklists } from './picklists'
@@ -16,10 +8,9 @@ import { buildResourceMap, buildCompanyMap, transformOpportunity } from './trans
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import type { AutotaskOpportunity, AutotaskCompany, AutotaskResource, SyncResult } from './types'
 
-const BATCH_SIZE       = 500
-const SYNC_LOG_FILE    = 'autotask-api'  // identifies API syncs in import_logs
+const BATCH_SIZE    = 500
+const SYNC_LOG_FILE = 'autotask-api'
 
-// ── Determine when the last successful sync ran ───────────────
 async function getLastSyncTime(): Promise<string | null> {
   const admin = createAdminSupabaseClient()
   const { data } = await admin
@@ -30,16 +21,12 @@ async function getLastSyncTime(): Promise<string | null> {
     .order('imported_at', { ascending: false })
     .limit(1)
     .maybeSingle()
-
   return data?.imported_at ?? null
 }
 
-// ── Log sync result to import_logs ────────────────────────────
 async function logSync(
   result: Omit<SyncResult, 'duration_ms' | 'sync_type'>,
   triggeredBy: string,
-  syncType: 'full' | 'incremental',
-  durationMs: number
 ) {
   const admin = createAdminSupabaseClient()
   await admin.from('import_logs').insert({
@@ -52,13 +39,12 @@ async function logSync(
     error_count:    result.errors.length,
     errors:         result.errors.length > 0 ? result.errors : null,
     status:
-      result.errors.length === 0 ? 'success'
-      : result.rows_inserted + result.rows_updated > 0 ? 'partial'
+      result.errors.length === 0                          ? 'success'
+      : result.rows_inserted + result.rows_updated > 0   ? 'partial'
       : 'error',
   })
 }
 
-// ── Main sync function ────────────────────────────────────────
 export async function syncOpportunities(triggeredBy: string): Promise<SyncResult> {
   const startMs = Date.now()
   const client  = new AutotaskClient()
@@ -67,28 +53,42 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   // ── 1. Determine sync type ──────────────────────────────────
   const lastSyncAt = await getLastSyncTime()
   const syncType: 'full' | 'incremental' = lastSyncAt ? 'incremental' : 'full'
-
   console.log(`[autotask/sync] Starting ${syncType} sync. Triggered by: ${triggeredBy}`)
-  if (lastSyncAt) {
-    console.log(`[autotask/sync] Fetching records updated since: ${lastSyncAt}`)
-  }
 
-  // ── 2. Fetch reference data in parallel ────────────────────
+  // ── 2. Fetch opportunities (required — abort if this fails) ─
   const oppFilter = lastSyncAt
     ? [{ op: 'gte', field: 'lastActivityDate', value: lastSyncAt }]
     : FILTER_ALL
 
-  const [picklists, resources, companies, rawOpps] = await Promise.all([
-    fetchOpportunityPicklists(client),
-    client.queryAll<AutotaskResource>('Resources', FILTER_ACTIVE),
-    client.queryAll<AutotaskCompany>('Companies',  FILTER_ALL),
-    client.queryAll<AutotaskOpportunity>('Opportunities', oppFilter),
-  ])
+  const rawOpps = await client.queryAll<AutotaskOpportunity>('Opportunities', oppFilter)
+  console.log(`[autotask/sync] Fetched ${rawOpps.length} opportunities`)
 
-  console.log(
-    `[autotask/sync] Fetched: ${rawOpps.length} opps, ` +
-    `${companies.length} companies, ${resources.length} resources`
-  )
+  // ── 3. Fetch picklists (required for status/stage labels) ───
+  const picklists = await fetchOpportunityPicklists(client)
+
+  // ── 4. Fetch resources — non-fatal ──────────────────────────
+  let resources: AutotaskResource[] = []
+  try {
+    resources = await client.queryAll<AutotaskResource>('Resources', FILTER_ACTIVE)
+    console.log(`[autotask/sync] Fetched ${resources.length} resources`)
+  } catch (err) {
+    console.warn(`[autotask/sync] Resources fetch failed (non-fatal): ${err instanceof Error ? err.message : err}`)
+  }
+
+  // ── 5. Fetch companies — try 'Companies' then 'Accounts' ────
+  let companies: AutotaskCompany[] = []
+  try {
+    companies = await client.queryAll<AutotaskCompany>('Companies', FILTER_ALL)
+    console.log(`[autotask/sync] Fetched ${companies.length} companies`)
+  } catch {
+    console.warn('[autotask/sync] Companies entity failed, trying Accounts...')
+    try {
+      companies = await client.queryAll<AutotaskCompany>('Accounts', FILTER_ALL)
+      console.log(`[autotask/sync] Fetched ${companies.length} accounts`)
+    } catch (err2) {
+      console.warn(`[autotask/sync] Company lookup unavailable (non-fatal): ${err2 instanceof Error ? err2.message : err2}`)
+    }
+  }
 
   const result: Omit<SyncResult, 'duration_ms' | 'sync_type'> = {
     rows_processed: rawOpps.length,
@@ -99,19 +99,17 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
     status:         'success',
   }
 
-  // Nothing to sync — still log so incremental works next time
   if (rawOpps.length === 0) {
-    await logSync(result, triggeredBy, syncType, Date.now() - startMs)
+    await logSync(result, triggeredBy)
     return { ...result, sync_type: syncType, duration_ms: Date.now() - startMs }
   }
 
-  // ── 3. Build lookup maps ────────────────────────────────────
+  // ── 6. Build lookup maps ────────────────────────────────────
   const resourceMap = buildResourceMap(resources)
   const companyMap  = buildCompanyMap(companies)
-
   const maps = { picklists, resources: resourceMap, companies: companyMap }
 
-  // ── 4. Transform rows ───────────────────────────────────────
+  // ── 7. Transform rows ───────────────────────────────────────
   const records: Record<string, unknown>[] = []
 
   rawOpps.forEach((opp, idx) => {
@@ -131,26 +129,20 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
     }
   })
 
-  // ── 5. Batch upsert ─────────────────────────────────────────
+  // ── 8. Batch upsert ─────────────────────────────────────────
   for (let i = 0; i < records.length; i += BATCH_SIZE) {
     const batch = records.slice(i, i + BATCH_SIZE)
 
     const { data, error } = await admin
       .from('opportunities')
-      .upsert(batch, {
-        onConflict:       'autotask_id',
-        ignoreDuplicates: false,
-      })
+      .upsert(batch, { onConflict: 'autotask_id', ignoreDuplicates: false })
       .select('id, created_at, updated_at')
 
     if (error) {
-      // Fallback: try composite_key upsert (for records already in DB from CSV)
+      // Fallback: upsert on composite_key (for records already imported via CSV)
       const { data: data2, error: error2 } = await admin
         .from('opportunities')
-        .upsert(batch, {
-          onConflict:       'composite_key',
-          ignoreDuplicates: false,
-        })
+        .upsert(batch, { onConflict: 'composite_key', ignoreDuplicates: false })
         .select('id, created_at, updated_at')
 
       if (error2) {
@@ -160,8 +152,6 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
         console.error(`[autotask/sync] ${msg}`)
         continue
       }
-
-      // Count inserts vs updates from fallback result
       countResults(data2, result)
       continue
     }
@@ -169,13 +159,13 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
     countResults(data, result)
   }
 
-  // ── 6. Log and return ───────────────────────────────────────
+  // ── 9. Log and return ───────────────────────────────────────
   result.status =
-    result.errors.length === 0 ? 'success'
-    : result.rows_inserted + result.rows_updated > 0 ? 'partial'
+    result.errors.length === 0                        ? 'success'
+    : result.rows_inserted + result.rows_updated > 0  ? 'partial'
     : 'failed'
 
-  await logSync(result, triggeredBy, syncType, Date.now() - startMs)
+  await logSync(result, triggeredBy)
 
   const final: SyncResult = {
     ...result,
@@ -184,15 +174,14 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   }
 
   console.log(
-    `[autotask/sync] Done. ` +
-    `${result.rows_inserted} inserted, ${result.rows_updated} updated, ` +
-    `${result.rows_skipped} skipped. ${Date.now() - startMs}ms`
+    `[autotask/sync] Done: ${result.rows_inserted} inserted, ` +
+    `${result.rows_updated} updated, ${result.rows_skipped} skipped. ` +
+    `${final.duration_ms}ms`
   )
 
   return final
 }
 
-// ── Helper: count inserts vs updates from Supabase response ──
 function countResults(
   data: Array<{ created_at: string; updated_at: string }> | null,
   result: { rows_inserted: number; rows_updated: number }
