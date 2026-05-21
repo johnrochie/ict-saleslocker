@@ -197,8 +197,3 @@ function countResults(
     else               result.rows_updated++
   })
 }
-    )
-    if (diffMs < 2000) result.rows_inserted++
-    else               result.rows_updated++
-  })
-}
