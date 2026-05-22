@@ -56,12 +56,12 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   console.log(`[autotask/sync] Starting ${syncType} sync. Triggered by: ${triggeredBy}`)
 
   // ── 2. Fetch opportunities (required — abort if this fails) ─
-  // Full sync  : id >= 1 (FILTER_ALL). Value 0 causes .NET null ref on Autotask side.
+  // Full sync  : 'exist' on id — returns all records. id >= N causes .NET null ref on
+  //              Autotask's Opportunities entity. createDate/lastActivityDate not queryable.
   // Incremental: lastModifiedDate — standard Autotask change-tracking field.
-  // NOTE: lastActivityDate and createDate are NOT queryable on the Opportunities entity.
   const oppFilter = lastSyncAt
     ? [{ op: 'gte', field: 'lastModifiedDate', value: lastSyncAt }]
-    : FILTER_ALL
+    : [{ op: 'exist', field: 'id' }]
 
   const rawOpps = await client.queryAll<AutotaskOpportunity>('Opportunities', oppFilter)
   console.log(`[autotask/sync] Fetched ${rawOpps.length} opportunities`)
