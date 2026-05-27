@@ -55,10 +55,7 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   const syncType: 'full' | 'incremental' = lastSyncAt ? 'incremental' : 'full'
   console.log(`[autotask/sync] Starting ${syncType} sync. Triggered by: ${triggeredBy}`)
 
-  // ── 2. Fetch opportunities (required — abort if this fails) ─
-  // Full sync  : companyID >= 1 — every opportunity has a company, always a valid FK.
-  //              id/createDate/exist all cause .NET null ref on Autotask's Opportunities entity.
-  // Incremental: lastModifiedDate — standard Autotask change-tracking field.
+  // ── 2. Fetch opportunities ──────────────────────────────────
   const oppFilter = lastSyncAt
     ? [{ op: 'gte', field: 'lastModifiedDate', value: lastSyncAt }]
     : [{ op: 'gte', field: 'companyID', value: 1 }]
@@ -66,10 +63,10 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   const rawOpps = await client.queryAll<AutotaskOpportunity>('Opportunities', oppFilter)
   console.log(`[autotask/sync] Fetched ${rawOpps.length} opportunities`)
 
-  // ── 3. Fetch picklists (required for status/stage labels) ───
+  // ── 3. Fetch picklists ──────────────────────────────────────
   const picklists = await fetchOpportunityPicklists(client)
 
-  // ── 4. Fetch resources — non-fatal ──────────────────────────
+  // ── 4. Fetch resources (non-fatal) ──────────────────────────
   let resources: AutotaskResource[] = []
   try {
     resources = await client.queryAll<AutotaskResource>('Resources', FILTER_ACTIVE)
@@ -78,7 +75,7 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
     console.warn(`[autotask/sync] Resources fetch failed (non-fatal): ${err instanceof Error ? err.message : err}`)
   }
 
-  // ── 5. Fetch companies — try 'Companies' then 'Accounts' ────
+  // ── 5. Fetch companies ──────────────────────────────────────
   let companies: AutotaskCompany[] = []
   try {
     companies = await client.queryAll<AutotaskCompany>('Companies', FILTER_ALL)
@@ -132,23 +129,69 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
     }
   })
 
-  // ── 7b. Deduplicate by autotask_id ─────────────────────────
-  // Autotask can return the same opportunity in multiple pages (race condition
-  // during pagination). PostgreSQL won't upsert two rows with the same conflict
-  // key in a single statement — keep the last occurrence of each autotask_id.
+  // ── 7b. Dedup by autotask_id, then by composite_key ────────
+  // Autotask pages can overlap; two different AT opps can also share the same
+  // company+title+date generating an identical composite_key. PostgreSQL raises
+  // "cannot affect row a second time" if a single INSERT batch has two rows
+  // that would resolve to the same target row — dedup both keys to prevent this.
   const seenIds = new Map<number, Record<string, unknown>>()
   records.forEach(r => {
     const aid = r.autotask_id as number
     if (aid != null) seenIds.set(aid, r)
   })
-  const dedupedRecords = Array.from(seenIds.values())
-  if (dedupedRecords.length < records.length) {
-    console.log(`[autotask/sync] Removed ${records.length - dedupedRecords.length} duplicate autotask_id(s)`)
+  const afterIdDedup = Array.from(seenIds.values())
+
+  const seenKeys = new Map<string, Record<string, unknown>>()
+  afterIdDedup.forEach(r => {
+    const ck = (r.composite_key as string) ?? String(r.autotask_id)
+    seenKeys.set(ck, r)
+  })
+  const dedupedRecords = Array.from(seenKeys.values())
+
+  console.log(
+    `[autotask/sync] After dedup: ${dedupedRecords.length} records ` +
+    `(raw: ${records.length}, after id-dedup: ${afterIdDedup.length})`
+  )
+
+  // ── 8. Fetch existing autotask_ids to split inserts vs updates ──
+  // Avoids ON CONFLICT DO UPDATE entirely — plain INSERT for new records
+  // removes all possibility of the "affect row a second time" error.
+  const { data: existingRows } = await admin
+    .from('opportunities')
+    .select('autotask_id')
+    .not('autotask_id', 'is', null)
+
+  const existingIdSet = new Set(
+    (existingRows ?? []).map(r => (r as { autotask_id: number }).autotask_id)
+  )
+
+  const toInsert = dedupedRecords.filter(r => !existingIdSet.has(r.autotask_id as number))
+  const toUpdate = dedupedRecords.filter(r =>  existingIdSet.has(r.autotask_id as number))
+  console.log(`[autotask/sync] ${toInsert.length} to insert, ${toUpdate.length} to update`)
+
+  // ── 9. Insert new records ───────────────────────────────────
+  // Use composite_key upsert so API records match/overwrite existing CSV rows.
+  for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+    const batch = toInsert.slice(i, i + BATCH_SIZE)
+
+    const { data, error } = await admin
+      .from('opportunities')
+      .upsert(batch, { onConflict: 'composite_key', ignoreDuplicates: false })
+      .select('id, created_at, updated_at')
+
+    if (error) {
+      const msg = `Insert batch ${Math.floor(i / BATCH_SIZE) + 1}: ${error.message}`
+      result.errors.push({ row: i, message: msg })
+      result.rows_skipped += batch.length
+      console.error(`[autotask/sync] ${msg}`)
+      continue
+    }
+    countResults(data, result)
   }
 
-  // ── 8. Batch upsert ─────────────────────────────────────────
-  for (let i = 0; i < dedupedRecords.length; i += BATCH_SIZE) {
-    const batch = dedupedRecords.slice(i, i + BATCH_SIZE)
+  // ── 10. Update existing records ─────────────────────────────
+  for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
+    const batch = toUpdate.slice(i, i + BATCH_SIZE)
 
     const { data, error } = await admin
       .from('opportunities')
@@ -156,30 +199,16 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
       .select('id, created_at, updated_at')
 
     if (error) {
-      console.warn(`[autotask/sync] autotask_id upsert failed (batch ${Math.floor(i / BATCH_SIZE) + 1}): ${error.message}`)
-      // Fallback: upsert on composite_key (for records already imported via CSV)
-      // ignoreDuplicates:true prevents errors when two AT records share the same
-      // company+title+date composite key — the first match wins.
-      const { data: data2, error: error2 } = await admin
-        .from('opportunities')
-        .upsert(batch, { onConflict: 'composite_key', ignoreDuplicates: true })
-        .select('id, created_at, updated_at')
-
-      if (error2) {
-        const msg = `Batch ${Math.floor(i / BATCH_SIZE) + 1}: ${error2.message}`
-        result.errors.push({ row: i, message: msg })
-        result.rows_skipped += batch.length
-        console.error(`[autotask/sync] ${msg}`)
-        continue
-      }
-      countResults(data2, result)
+      const msg = `Update batch ${Math.floor(i / BATCH_SIZE) + 1}: ${error.message}`
+      result.errors.push({ row: i, message: msg })
+      result.rows_skipped += batch.length
+      console.error(`[autotask/sync] ${msg}`)
       continue
     }
-
     countResults(data, result)
   }
 
-  // ── 9. Log and return ───────────────────────────────────────
+  // ── 11. Log and return ──────────────────────────────────────
   result.status =
     result.errors.length === 0                        ? 'success'
     : result.rows_inserted + result.rows_updated > 0  ? 'partial'
