@@ -156,10 +156,13 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
       .select('id, created_at, updated_at')
 
     if (error) {
+      console.warn(`[autotask/sync] autotask_id upsert failed (batch ${Math.floor(i / BATCH_SIZE) + 1}): ${error.message}`)
       // Fallback: upsert on composite_key (for records already imported via CSV)
+      // ignoreDuplicates:true prevents errors when two AT records share the same
+      // company+title+date composite key — the first match wins.
       const { data: data2, error: error2 } = await admin
         .from('opportunities')
-        .upsert(batch, { onConflict: 'composite_key', ignoreDuplicates: false })
+        .upsert(batch, { onConflict: 'composite_key', ignoreDuplicates: true })
         .select('id, created_at, updated_at')
 
       if (error2) {
