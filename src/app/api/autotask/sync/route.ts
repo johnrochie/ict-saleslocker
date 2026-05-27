@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
 }
 
 // ── Shared sync runner ────────────────────────────────────────
+// v3 — dual dedup + DO NOTHING fallback
 async function runSync(triggeredBy: string) {
   if (!AutotaskClient.isConfigured()) {
     return NextResponse.json(
