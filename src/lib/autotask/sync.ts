@@ -132,9 +132,23 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
     }
   })
 
+  // ── 7b. Deduplicate by autotask_id ─────────────────────────
+  // Autotask can return the same opportunity in multiple pages (race condition
+  // during pagination). PostgreSQL won't upsert two rows with the same conflict
+  // key in a single statement — keep the last occurrence of each autotask_id.
+  const seenIds = new Map<number, Record<string, unknown>>()
+  records.forEach(r => {
+    const aid = r.autotask_id as number
+    if (aid != null) seenIds.set(aid, r)
+  })
+  const dedupedRecords = Array.from(seenIds.values())
+  if (dedupedRecords.length < records.length) {
+    console.log(`[autotask/sync] Removed ${records.length - dedupedRecords.length} duplicate autotask_id(s)`)
+  }
+
   // ── 8. Batch upsert ─────────────────────────────────────────
-  for (let i = 0; i < records.length; i += BATCH_SIZE) {
-    const batch = records.slice(i, i + BATCH_SIZE)
+  for (let i = 0; i < dedupedRecords.length; i += BATCH_SIZE) {
+    const batch = dedupedRecords.slice(i, i + BATCH_SIZE)
 
     const { data, error } = await admin
       .from('opportunities')
