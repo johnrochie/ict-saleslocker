@@ -51,14 +51,15 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   const admin   = createAdminSupabaseClient()
 
   // ── 1. Determine sync type ──────────────────────────────────
+  // Opportunities entity has no queryable modification date field (lastModifiedDate
+  // does not exist on this entity). Always run a full sync.
+  // With Vercel Hobby (daily cron, 500-record API page limit) this is fast and correct.
   const lastSyncAt = await getLastSyncTime()
-  const syncType: 'full' | 'incremental' = lastSyncAt ? 'incremental' : 'full'
-  console.log(`[autotask/sync] Starting ${syncType} sync. Triggered by: ${triggeredBy}`)
+  const syncType: 'full' | 'incremental' = 'full'
+  console.log(`[autotask/sync] Starting ${syncType} sync (lastSyncAt: ${lastSyncAt ?? 'none'}). Triggered by: ${triggeredBy}`)
 
   // ── 2. Fetch opportunities ──────────────────────────────────
-  const oppFilter = lastSyncAt
-    ? [{ op: 'gte', field: 'lastModifiedDate', value: lastSyncAt }]
-    : [{ op: 'gte', field: 'companyID', value: 1 }]
+  const oppFilter = [{ op: 'gte', field: 'companyID', value: 1 }]
 
   const rawOpps = await client.queryAll<AutotaskOpportunity>('Opportunities', oppFilter)
   console.log(`[autotask/sync] Fetched ${rawOpps.length} opportunities`)
