@@ -4,6 +4,7 @@
 // ============================================================
 // Manual POST: requires admin or sales_manager session
 // Vercel cron GET: requires Authorization: Bearer CRON_SECRET
+// v4 — always full sync (no lastModifiedDate on Opportunities)
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server'
