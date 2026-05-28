@@ -51,7 +51,8 @@ export async function POST(request: NextRequest) {
 }
 
 // ── Shared sync runner ────────────────────────────────────────
-// v3 — dual dedup + DO NOTHING fallback
+// v5 — clear last sync time before each run so the full-scan filter is always used.
+// The Opportunities entity has no lastModifiedDate field; incremental filters fail.
 async function runSync(triggeredBy: string) {
   if (!AutotaskClient.isConfigured()) {
     return NextResponse.json(
@@ -62,6 +63,18 @@ async function runSync(triggeredBy: string) {
       { status: 503 }
     )
   }
+
+  // Mark any previous successful sync logs as superseded so getLastSyncTime()
+  // returns null and the sync always runs a full scan (companyID >= 1).
+  // This is required because the Autotask Opportunities entity has no
+  // lastModifiedDate field — incremental filters cause a 500 error.
+  const admin = createAdminSupabaseClient()
+  await admin
+    .from('import_logs')
+    .update({ status: 'superseded' })
+    .eq('filename', 'autotask-api')
+    .eq('status', 'success')
+  console.log('[api/autotask/sync] Cleared previous sync logs — forcing full scan')
 
   try {
     const result = await syncOpportunities(triggeredBy)
