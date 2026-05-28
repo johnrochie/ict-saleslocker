@@ -1,5 +1,6 @@
 // ============================================================
 // ICT SalesLocker — Autotask Sync Orchestrator
+// v5 — always full sync (Opportunities has no lastModifiedDate)
 // ============================================================
 
 import { AutotaskClient, FILTER_ALL, FILTER_ACTIVE } from './client'
@@ -50,15 +51,15 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   const client  = new AutotaskClient()
   const admin   = createAdminSupabaseClient()
 
-  // ── 1. Determine sync type ──────────────────────────────────
-  // Opportunities entity has no queryable modification date field (lastModifiedDate
-  // does not exist on this entity). Always run a full sync.
-  // With Vercel Hobby (daily cron, 500-record API page limit) this is fast and correct.
+  // ── 1. Sync type ────────────────────────────────────────────
+  // The Autotask Opportunities entity has no lastModifiedDate or equivalent
+  // queryable modification field — always run a full sync.
+  // On Vercel Hobby (daily cron, 500-record API page limit) this is fast and correct.
   const lastSyncAt = await getLastSyncTime()
-  const syncType: 'full' | 'incremental' = 'full'
-  console.log(`[autotask/sync] Starting ${syncType} sync (lastSyncAt: ${lastSyncAt ?? 'none'}). Triggered by: ${triggeredBy}`)
+  const syncType   = 'full' as const
+  console.log(`[autotask/sync] v5 starting ${syncType} sync. lastSyncAt=${lastSyncAt ?? 'none'}. triggeredBy=${triggeredBy}`)
 
-  // ── 2. Fetch opportunities ──────────────────────────────────
+  // ── 2. Fetch opportunities (always full) ────────────────────
   const oppFilter = [{ op: 'gte', field: 'companyID', value: 1 }]
 
   const rawOpps = await client.queryAll<AutotaskOpportunity>('Opportunities', oppFilter)
@@ -131,8 +132,7 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   })
 
   // ── 7b. Dedup by autotask_id, then by composite_key ────────
-  // Prevents "ON CONFLICT DO UPDATE command cannot affect row a second time":
-  // two rows with the same conflict key in one batch triggers this PostgreSQL error.
+  // Prevents "ON CONFLICT DO UPDATE command cannot affect row a second time"
   const seenIds = new Map<number, Record<string, unknown>>()
   records.forEach(r => {
     const aid = r.autotask_id as number
@@ -150,9 +150,6 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   console.log(`[autotask/sync] After dedup: ${dedupedRecords.length} (raw: ${records.length})`)
 
   // ── 8. Batch upsert ─────────────────────────────────────────
-  // Primary: upsert on composite_key with DO UPDATE — links API records to any
-  // existing CSV rows with the same company+title+date, or inserts new rows.
-  // Fallback: DO NOTHING — if DO UPDATE still errors, at least inserts new rows.
   for (let i = 0; i < dedupedRecords.length; i += BATCH_SIZE) {
     const batch = dedupedRecords.slice(i, i + BATCH_SIZE)
 
