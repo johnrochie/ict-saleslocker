@@ -87,8 +87,10 @@ export function transformOpportunity(
   const { picklists, resources, companies } = maps
 
   // ── Resolve company + account manager ────────────────────────
-  const company          = companies.get(opp.accountID)
-  const companyName      = company?.name ?? `Account#${opp.accountID}`
+  // Autotask field may be 'accountID' or 'companyID' depending on instance version
+  const accountId        = opp.accountID ?? (opp as Record<string, unknown>).companyID as number | undefined
+  const company          = accountId != null ? companies.get(accountId) : undefined
+  const companyName      = company?.name ?? (accountId != null ? `Account#${accountId}` : 'Unknown Account')
   const accountManagerId = company?.accountManagerId ?? null
   const accountManager   = accountManagerId ? (resources.get(accountManagerId) ?? null) : null
   const opportunityOwner = opp.ownerResourceID ? (resources.get(opp.ownerResourceID) ?? null) : null

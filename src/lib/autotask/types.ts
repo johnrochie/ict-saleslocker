@@ -9,7 +9,8 @@
 export interface AutotaskOpportunity {
   id: number
   title: string                         // Opportunity name
-  accountID: number                     // → Companies.id
+  accountID?: number                    // → Companies.id (some instances use companyID instead)
+  companyID?: number                    // → Companies.id (alias used by some Autotask instances)
   ownerResourceID: number               // Opportunity Owner → Resources.id
   contactID: number | null              // → Contacts.id (optional lookup)
   status: number                        // Picklist int
