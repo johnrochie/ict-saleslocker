@@ -72,37 +72,58 @@ export class AutotaskClient {
     return res.json() as Promise<T>
   }
 
-  async queryAll<T>(entity: string, filter: unknown[]): Promise<T[]> {
+  async queryAll<T extends { id?: number }>(entity: string, filter: unknown[]): Promise<T[]> {
     const base     = await this.getBaseUrl()
     const items: T[] = []
     const queryUrl = `${base}/${entity}/query`
 
-    const firstRes = await fetch(queryUrl, {
-      method:  'POST',
-      headers: this.authHeaders(),
-      body:    JSON.stringify({ filter }),
-    })
+    // Autotask ww16 returns 405 on nextPageUrl for some entities (Opportunities,
+    // Companies). Use ID-cursor pagination instead: after each page, re-query
+    // with id > maxId until the page comes back empty.
+    let minId = 0
+    let page  = 0
 
-    if (!firstRes.ok) {
-      const body = await firstRes.text().catch(() => '')
-      throw new Error(
-        `Query ${entity} failed (${firstRes.status}) at ${queryUrl} -- ${body.slice(0, 200)}`
-      )
-    }
+    while (true) {
+      // Build filter: original conditions AND id > minId
+      const pageFilter = minId > 0
+        ? [...filter, { op: 'gt', field: 'id', value: minId }]
+        : filter
 
-    const firstPage = await firstRes.json() as AutotaskQueryResponse<T>
-    items.push(...(firstPage.items ?? []))
+      const res = await fetch(queryUrl, {
+        method:  'POST',
+        headers: this.authHeaders(),
+        body:    JSON.stringify({ filter: pageFilter }),
+      })
 
-    let nextUrl = firstPage.pageDetails?.nextPageUrl ?? null
-    while (nextUrl) {
-      const res = await fetch(nextUrl, { headers: this.authHeaders() })
       if (!res.ok) {
-        console.warn(`[autotask] Pagination stopped at: ${nextUrl} (${res.status})`)
+        const body = await res.text().catch(() => '')
+        if (page === 0) {
+          // First page failure is fatal
+          throw new Error(
+            `Query ${entity} failed (${res.status}) at ${queryUrl} -- ${body.slice(0, 200)}`
+          )
+        }
+        // Subsequent page failure — stop gracefully
+        console.warn(`[autotask] ${entity} page ${page + 1} failed (${res.status}) — stopping`)
         break
       }
-      const page = await res.json() as AutotaskQueryResponse<T>
-      items.push(...(page.items ?? []))
-      nextUrl = page.pageDetails?.nextPageUrl ?? null
+
+      const data = await res.json() as AutotaskQueryResponse<T>
+      const batch = data.items ?? []
+      items.push(...batch)
+      page++
+
+      if (batch.length === 0) break  // no more records
+
+      // Advance cursor to the highest ID in this batch
+      const maxId = Math.max(...batch.map(r => r.id ?? 0))
+      if (maxId <= minId) break      // guard against infinite loop
+      minId = maxId
+
+      // If the page wasn't full (< 500), we've reached the end
+      if (batch.length < 500) break
+
+      console.log(`[autotask/client] ${entity} page ${page}: ${items.length} fetched so far (cursor id>${minId})`)
     }
 
     return items
