@@ -131,9 +131,10 @@ export function transformOpportunity(
     ? (grossProfit / revenueTotal) * 100
     : 0
 
-  // One-time amounts — use setupFee if present, otherwise same as total
-  const revenueOneTime = Number(opp.setupFee ?? opp.amount) || revenueTotal
-  const costOneTime    = costTotal  // API doesn't clearly split this
+  // One-time amounts — API field confirmed as onetimeRevenue / onetimeCost
+  const raw = opp as Record<string, unknown>
+  const revenueOneTime = Number(raw.onetimeRevenue ?? raw.setupFee ?? opp.amount) || revenueTotal
+  const costOneTime    = Number(raw.onetimeCost    ?? costTotal)
 
   // ── Computed fields ───────────────────────────────────────────
   const ageDays = opp.createDate
@@ -167,20 +168,32 @@ export function transformOpportunity(
     // timezone shifts that move dates one day earlier.
     created_date:         opp.createDate         ? new Date(opp.createDate).toISOString()         : null,
     projected_close_date: opp.projectedCloseDate  ? toDateOnly(opp.projectedCloseDate)             : null,
-    // closed_date fallback chain for won deals where Autotask didn't auto-populate:
-    //   1. closedDate          — authoritative, use if present
-    //   2. lastActivityDate    — best proxy for actual close date
-    //   3. projectedCloseDate  — last resort, ONLY if already in the past
-    //                            (prevents future dates from hiding won deals)
-    //   4. undefined           — preserve whatever is already in the DB;
-    //                            never overwrite an existing date with null
+    // closed_date fallback chain for won deals.
+    // Autotask REST API field names vary by instance version — check multiple aliases.
+    //   1. closedDate / closeDate / opportunityCloseDate  — authoritative
+    //   2. lastActivityDate / lastActivity               — best proxy
+    //   3. projectedCloseDate / estimatedCloseDate       — last resort (any date)
+    //   4. undefined — preserve whatever is already in the DB
     closed_date: (() => {
       if (normalisedStatus !== 'won') return undefined
-      if (opp.closedDate)       return toDateOnly(opp.closedDate)
-      if (opp.lastActivityDate) return toDateOnly(opp.lastActivityDate)
-      const projDate = toDateOnly(opp.projectedCloseDate)
-      const today    = new Date().toISOString().slice(0, 10)
-      if (projDate && projDate <= today) return projDate
+      // 1. Actual close date — try multiple field name aliases
+      const closedDate =
+        (raw.closedDate as string | null) ??
+        (raw.closeDate  as string | null) ??
+        (raw.opportunityCloseDate as string | null)
+      if (closedDate) return toDateOnly(closedDate)
+      // 2. Last activity date — good proxy for when deal was closed
+      const lastAct =
+        (raw.lastActivityDate as string | null) ??
+        (raw.lastActivity     as string | null)
+      if (lastAct) return toDateOnly(lastAct)
+      // 3. Projected close — any date is better than null for won deals
+      const projDate = toDateOnly(
+        (raw.projectedCloseDate  as string | null) ??
+        (raw.estimatedCloseDate  as string | null)
+      )
+      if (projDate) return projDate
+      // 4. Preserve existing DB value
       return undefined
     })(),
     last_activity:        opp.lastActivityDate    ? new Date(opp.lastActivityDate).toISOString()    : null,
