@@ -150,30 +150,21 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   console.log(`[autotask/sync] After dedup: ${dedupedRecords.length} (raw: ${records.length})`)
 
   // ── 8. Batch upsert ─────────────────────────────────────────
+  // Upsert on autotask_id — the authoritative key for API records.
+  // Updates existing API records in place; inserts new ones without
+  // creating duplicates alongside any remaining CSV-imported rows.
   for (let i = 0; i < dedupedRecords.length; i += BATCH_SIZE) {
     const batch = dedupedRecords.slice(i, i + BATCH_SIZE)
 
     const { data, error } = await admin
       .from('opportunities')
-      .upsert(batch, { onConflict: 'composite_key', ignoreDuplicates: false })
+      .upsert(batch, { onConflict: 'autotask_id', ignoreDuplicates: false })
       .select('id, created_at, updated_at')
 
     if (error) {
-      console.error(`[autotask/sync] DO UPDATE failed (batch ${Math.floor(i / BATCH_SIZE) + 1}): ${error.message} — retrying with DO NOTHING`)
-
-      const { data: data2, error: error2 } = await admin
-        .from('opportunities')
-        .upsert(batch, { onConflict: 'composite_key', ignoreDuplicates: true })
-        .select('id, created_at, updated_at')
-
-      if (error2) {
-        const msg = `Batch ${Math.floor(i / BATCH_SIZE) + 1}: ${error2.message}`
-        result.errors.push({ row: i, message: msg })
-        result.rows_skipped += batch.length
-        console.error(`[autotask/sync] DO NOTHING also failed: ${msg}`)
-        continue
-      }
-      countResults(data2, result)
+      console.error(`[autotask/sync] Upsert failed (batch ${Math.floor(i / BATCH_SIZE) + 1}): ${error.message}`)
+      result.errors.push({ row: i, message: `Batch ${Math.floor(i / BATCH_SIZE) + 1}: ${error.message}` })
+      result.rows_skipped += batch.length
       continue
     }
 

@@ -154,7 +154,15 @@ export function transformOpportunity(
     // ── Dates ─────────────────────────────────────────────────
     created_date:         opp.createDate          ? new Date(opp.createDate).toISOString()          : null,
     projected_close_date: opp.projectedCloseDate  ? new Date(opp.projectedCloseDate).toISOString()  : null,
-    closed_date:          opp.closedDate          ? new Date(opp.closedDate).toISOString()          : null,
+    // closed_date: use closedDate if set; fall back to lastActivityDate for won
+    // deals where Autotask didn't auto-populate the field (common in some workflows).
+    // NOTE: projectedCloseDate was the previous fallback but caused issues — it can
+    // be set far in the future, which pushed won deals outside weekly report date ranges.
+    closed_date: opp.closedDate
+      ? new Date(opp.closedDate).toISOString()
+      : (normalisedStatus === 'won' && opp.lastActivityDate)
+        ? new Date(opp.lastActivityDate).toISOString()
+        : null,
     last_activity:        opp.lastActivityDate    ? new Date(opp.lastActivityDate).toISOString()    : null,
 
     // ── Financials ────────────────────────────────────────────
