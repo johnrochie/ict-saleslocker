@@ -167,15 +167,22 @@ export function transformOpportunity(
     // timezone shifts that move dates one day earlier.
     created_date:         opp.createDate         ? new Date(opp.createDate).toISOString()         : null,
     projected_close_date: opp.projectedCloseDate  ? toDateOnly(opp.projectedCloseDate)             : null,
-    // closed_date: use closedDate if set; fall back to lastActivityDate for won
-    // deals where Autotask didn't auto-populate the field (common in some workflows).
-    // Use `undefined` (not `null`) as final fallback so a missing value never
-    // overwrites a previously correct date already stored in the DB.
-    closed_date: opp.closedDate
-      ? toDateOnly(opp.closedDate)
-      : (normalisedStatus === 'won' && opp.lastActivityDate)
-        ? toDateOnly(opp.lastActivityDate)
-        : undefined,
+    // closed_date fallback chain for won deals where Autotask didn't auto-populate:
+    //   1. closedDate          — authoritative, use if present
+    //   2. lastActivityDate    — best proxy for actual close date
+    //   3. projectedCloseDate  — last resort, ONLY if already in the past
+    //                            (prevents future dates from hiding won deals)
+    //   4. undefined           — preserve whatever is already in the DB;
+    //                            never overwrite an existing date with null
+    closed_date: (() => {
+      if (normalisedStatus !== 'won') return undefined
+      if (opp.closedDate)       return toDateOnly(opp.closedDate)
+      if (opp.lastActivityDate) return toDateOnly(opp.lastActivityDate)
+      const projDate = toDateOnly(opp.projectedCloseDate)
+      const today    = new Date().toISOString().slice(0, 10)
+      if (projDate && projDate <= today) return projDate
+      return undefined
+    })(),
     last_activity:        opp.lastActivityDate    ? new Date(opp.lastActivityDate).toISOString()    : null,
 
     // ── Financials ────────────────────────────────────────────
