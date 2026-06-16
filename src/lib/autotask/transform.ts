@@ -79,6 +79,16 @@ function buildCompositeKey(
   return `${company}||${opp}||${date}`
 }
 
+// ── Date helpers ──────────────────────────────────────────────
+// Extract the date part from an API date string without UTC conversion.
+// Autotask may return dates as "2026-06-09T00:00:00+01:00" (Irish midnight),
+// which new Date(...).toISOString() shifts to "2026-06-08T23:00:00Z" — one day early.
+// Slicing the string directly preserves the calendar date as stored in Autotask.
+function toDateOnly(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null
+  return dateStr.slice(0, 10)
+}
+
 // ── Main transform ────────────────────────────────────────────
 export function transformOpportunity(
   opp: AutotaskOpportunity,
@@ -152,17 +162,20 @@ export function transformOpportunity(
     normalised_status:    normalisedStatus,
 
     // ── Dates ─────────────────────────────────────────────────
-    created_date:         opp.createDate          ? new Date(opp.createDate).toISOString()          : null,
-    projected_close_date: opp.projectedCloseDate  ? new Date(opp.projectedCloseDate).toISOString()  : null,
+    // created_date / last_activity are TIMESTAMPTZ — keep full ISO string.
+    // projected_close_date / closed_date are DATE — use toDateOnly() to avoid
+    // timezone shifts that move dates one day earlier.
+    created_date:         opp.createDate         ? new Date(opp.createDate).toISOString()         : null,
+    projected_close_date: opp.projectedCloseDate  ? toDateOnly(opp.projectedCloseDate)             : null,
     // closed_date: use closedDate if set; fall back to lastActivityDate for won
     // deals where Autotask didn't auto-populate the field (common in some workflows).
-    // NOTE: projectedCloseDate was the previous fallback but caused issues — it can
-    // be set far in the future, which pushed won deals outside weekly report date ranges.
+    // Use `undefined` (not `null`) as final fallback so a missing value never
+    // overwrites a previously correct date already stored in the DB.
     closed_date: opp.closedDate
-      ? new Date(opp.closedDate).toISOString()
+      ? toDateOnly(opp.closedDate)
       : (normalisedStatus === 'won' && opp.lastActivityDate)
-        ? new Date(opp.lastActivityDate).toISOString()
-        : null,
+        ? toDateOnly(opp.lastActivityDate)
+        : undefined,
     last_activity:        opp.lastActivityDate    ? new Date(opp.lastActivityDate).toISOString()    : null,
 
     // ── Financials ────────────────────────────────────────────
