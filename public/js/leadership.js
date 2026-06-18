@@ -4,7 +4,7 @@
    Falls back to CSV upload if data not present
 ===================================================================== */
 let winsRaw = null, pipeRaw = null;
-let winsData = [], pipeData = [];
+let winsData = [], pipeData = [], quarantineData = [];
 let catChart = null;
 
 function parseCSV(text) {
@@ -108,7 +108,9 @@ function inPeriod(dateStr,period){
 function processData(){
   const period=getPeriod();
   winsData=(winsRaw||[]).filter(d=>{ if(isTestRow(d)) return false; return inPeriod(d['Closed Date'],period); });
-  pipeData=(pipeRaw||[]).filter(d=>{ if(isTestRow(d)) return false; const status=(d.Status||'').toLowerCase().trim(); const sn=stageNum(d.Stage); return (status==='active'&&sn<5); }); // no date filter — pipeline always shows all active deals
+  // Quarantine deals split out — excluded from pipeline so they don't inflate overdue counts
+  quarantineData=(pipeRaw||[]).filter(d=>{ if(isTestRow(d)) return false; return (d.Stage||'').toLowerCase().trim()==='quarantine'; });
+  pipeData=(pipeRaw||[]).filter(d=>{ if(isTestRow(d)) return false; if((d.Stage||'').toLowerCase().trim()==='quarantine') return false; const status=(d.Status||'').toLowerCase().trim(); const sn=stageNum(d.Stage); return (status==='active'&&sn<5); }); // no date filter — pipeline always shows all active deals
   _catColorIdx={};
   const allCats=[...new Set([...winsData,...pipeData].map(d=>normCat(d['Opportunity Category'])))].sort();
   allCats.forEach(c=>catColor(c));
@@ -141,6 +143,7 @@ function buildDashboard(){
   if(pipeRaw) html+=buildForecast();
   if(winsRaw||pipeRaw) html+=buildKeyDeals();
   if(pipeRaw) html+=buildRisks();
+  if(pipeRaw) html+=buildQuarantine();
   const ca=document.getElementById('contentArea'); if(ca) ca.innerHTML=`<div class="wrapper">${html}</div>`;
   if(winsRaw&&pipeRaw) renderCatChart(winCats,pipeCats);
   const fd=document.getElementById('footerDate'); if(fd) fd.textContent='Generated '+new Date().toLocaleDateString('en-IE',{day:'2-digit',month:'long',year:'numeric'});
@@ -382,8 +385,48 @@ function buildRisks(){
   return `<div class="section"><div class="section-hdr"><div class="section-hdr-left"><span class="section-icon">⚠️</span><div><div class="section-title">Risks &amp; Attention Areas</div><div class="section-meta">Items requiring leadership awareness</div></div></div></div><div class="section-body"><div class="risk-grid">${risks.map(r=>`<div class="risk-card ${r.level}"><div class="risk-title">${r.title}</div><div class="risk-body">${r.body}</div></div>`).join('')}</div></div></div>`;
 }
 
+function buildQuarantine(){
+  if(!quarantineData||!quarantineData.length) return '';
+  const sorted=[...quarantineData].sort((a,b)=>parseEuro(b['Revenue (Total)'])-parseEuro(a['Revenue (Total)'])).slice(0,10);
+  const total=quarantineData.reduce((s,d)=>s+parseEuro(d['Revenue (Total)']),0);
+  const rows=sorted.map((d,i)=>{
+    const rev=parseEuro(d['Revenue (Total)']);
+    const gpPct=parsePct(d['Gross Profit Percentage']);
+    const rep=(d['Account Manager']||d['Opportunity Owner']||'—');
+    const repShort=rep.includes(',')?rep.split(',').map(s=>s.trim()).reverse().join(' '):rep;
+    const age=parseInt(d['Age (in days)']||0);
+    return `<tr>
+      <td><div class="deal-num">${i+1}</div></td>
+      <td><div class="deal-co">${d.Company||'—'}</div><div class="deal-opp" title="${d.Opportunity||''}">${d.Opportunity||'—'}</div></td>
+      <td style="font-size:.68rem;">${normCat(d['Opportunity Category'])}</td>
+      <td style="font-size:.68rem;color:var(--muted);">${repShort}</td>
+      <td class="r"><strong>${fmtE(rev)}</strong></td>
+      <td class="r"><span class="gp-chip ${gpCls(gpPct)}">${fmtP(gpPct)}</span></td>
+      <td class="r" style="font-size:.68rem;color:var(--muted);">${age}d</td>
+    </tr>`;
+  }).join('');
+  return `<div class="section">
+    <div class="section-hdr">
+      <div class="section-hdr-left">
+        <span class="section-icon">🔒</span>
+        <div>
+          <div class="section-title">Quarantine Pipeline</div>
+          <div class="section-meta">${quarantineData.length} deal${quarantineData.length!==1?'s':''} on hold &nbsp;·&nbsp; Not included in active pipeline or overdue counts</div>
+        </div>
+      </div>
+      <div class="section-total" style="color:var(--muted);">${fmtE(total)}</div>
+    </div>
+    <div>
+      <div style="overflow-x:auto;"><table class="key-deals-table">
+        <thead><tr><th>#</th><th>Customer / Opportunity</th><th>Category</th><th>Rep</th><th class="r">Revenue</th><th class="r">GP%</th><th class="r">Age</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>
+  </div>`;
+}
+
 function resetAll(){
-  winsRaw=null; pipeRaw=null; winsData=[]; pipeData=[];
+  winsRaw=null; pipeRaw=null; winsData=[]; pipeData=[]; quarantineData=[];
   if(catChart){catChart.destroy();catChart=null;} _catColorIdx={};
   ['lcWins','lcPipe'].forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.remove('loaded','drag-over'); });
   const ws=document.getElementById('lcWinsSub'); if(ws){ws.textContent='Drop CSV or click to browse';ws.className='lc-status';}

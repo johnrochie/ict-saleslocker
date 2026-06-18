@@ -168,32 +168,23 @@ export function transformOpportunity(
     // timezone shifts that move dates one day earlier.
     created_date:         opp.createDate         ? new Date(opp.createDate).toISOString()         : null,
     projected_close_date: opp.projectedCloseDate  ? toDateOnly(opp.projectedCloseDate)             : null,
-    // closed_date fallback chain for won deals.
-    // Autotask REST API field names vary by instance version — check multiple aliases.
-    //   1. closedDate / closeDate / opportunityCloseDate  — authoritative
-    //   2. lastActivityDate / lastActivity               — best proxy
-    //   3. projectedCloseDate / estimatedCloseDate       — last resort (any date)
-    //   4. undefined — preserve whatever is already in the DB
+    // closed_date fallback for won deals.
+    // NOTE: lastActivity is intentionally excluded — it updates on every deal touch,
+    // so using it as a close date proxy moves deals into the wrong reporting week.
+    //   1. closedDate — authoritative (populated by Autotask when deal is won)
+    //   2. projectedCloseDate — approximation; better than null, keeps deal visible
+    //   3. undefined — never overwrite an existing DB value with null
     closed_date: (() => {
       if (normalisedStatus !== 'won') return undefined
-      // 1. Actual close date — try multiple field name aliases
       const closedDate =
         (raw.closedDate as string | null) ??
-        (raw.closeDate  as string | null) ??
-        (raw.opportunityCloseDate as string | null)
+        (raw.closeDate  as string | null)
       if (closedDate) return toDateOnly(closedDate)
-      // 2. Last activity date — good proxy for when deal was closed
-      const lastAct =
-        (raw.lastActivityDate as string | null) ??
-        (raw.lastActivity     as string | null)
-      if (lastAct) return toDateOnly(lastAct)
-      // 3. Projected close — any date is better than null for won deals
       const projDate = toDateOnly(
-        (raw.projectedCloseDate  as string | null) ??
-        (raw.estimatedCloseDate  as string | null)
+        (raw.projectedCloseDate as string | null) ??
+        (raw.estimatedCloseDate as string | null)
       )
       if (projDate) return projDate
-      // 4. Preserve existing DB value
       return undefined
     })(),
     last_activity:        opp.lastActivityDate    ? new Date(opp.lastActivityDate).toISOString()    : null,

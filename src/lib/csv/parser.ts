@@ -78,11 +78,19 @@ function convertTo24h(timeStr: string): string {
 }
 
 // ── Composite key ────────────────────────────────────────────
-// Unique identifier for CSV upserts (no Autotask ID in export)
+// Unique identifier for CSV upserts (no Autotask ID in export).
+// Date is normalised to YYYY-MM-DD so keys match those produced by the
+// Autotask API sync (which uses opp.createDate.split('T')[0]).
+// CSV exports use DD/MM/YYYY — we convert to avoid duplicate rows when
+// the same opportunity exists from both a sync and a CSV import.
 function buildCompositeKey(row: AutotaskCsvRow): string {
   const company = (row.Company || '').trim().toLowerCase()
   const opp = (row.Opportunity || '').trim().toLowerCase()
-  const date = (row['Create Date'] || '').trim().split(' ')[0] // date part only
+  const rawDate = (row['Create Date'] || '').trim().split(' ')[0] // "15/01/2026"
+  const parts = rawDate.split('/')
+  const date = parts.length === 3
+    ? `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}` // → "2026-01-15"
+    : rawDate // fallback: leave as-is if format unexpected
   return `${company}||${opp}||${date}`
 }
 
