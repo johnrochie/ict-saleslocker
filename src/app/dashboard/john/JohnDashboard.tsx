@@ -3,8 +3,11 @@
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { Opportunity } from '@/types'
+import MorningBrief from './MorningBrief'
+import ActionList from './ActionList'
+import DealTimeline from './DealTimeline'
+import WinLossAnalysis from './WinLossAnalysis'
 
-// ─── helpers ────────────────────────────────────────────────
 function euros(n: number) {
   return new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
 }
@@ -22,12 +25,12 @@ function StatCard({ label, value, sub, colour }: { label: string; value: string;
 
 function OppRow({ opp }: { opp: Opportunity }) {
   const statusColour: Record<string, string> = {
-    won: 'bg-green-100 text-green-700',
-    pipeline: 'bg-blue-100 text-blue-700',
-    on_hold: 'bg-amber-100 text-amber-700',
+    won:         'bg-green-100 text-green-700',
+    pipeline:    'bg-blue-100 text-blue-700',
+    on_hold:     'bg-amber-100 text-amber-700',
     on_hold_stale: 'bg-red-100 text-red-700',
-    lost: 'bg-gray-100 text-gray-500',
-    portal: 'bg-purple-100 text-purple-700',
+    lost:        'bg-gray-100 text-gray-500',
+    portal:      'bg-purple-100 text-purple-700',
   }
   return (
     <tr className="hover:bg-gray-50 transition-colors">
@@ -38,14 +41,13 @@ function OppRow({ opp }: { opp: Opportunity }) {
       <td className="py-2.5 px-3 text-sm text-gray-500">{pct(opp.gross_margin_pct)}</td>
       <td className="py-2.5 px-3">
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColour[opp.normalised_status] ?? 'bg-gray-100 text-gray-500'}`}>
-          {opp.normalised_status.replace('_', ' ')}
+          {opp.normalised_status.replace(/_/g, ' ')}
         </span>
       </td>
     </tr>
   )
 }
 
-// ─── tabs ────────────────────────────────────────────────────
 type Tab = 'sales' | 'team' | 'ops' | 'financial' | 'marketing'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
@@ -56,7 +58,6 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'marketing', label: 'Marketing', icon: '📣' },
 ]
 
-// ─── main component ──────────────────────────────────────────
 export default function JohnDashboard({
   wins, pipeline, all,
 }: {
@@ -66,18 +67,17 @@ export default function JohnDashboard({
 }) {
   const [tab, setTab] = useState<Tab>('sales')
 
-  // ── derived metrics ──
   const metrics = useMemo(() => {
-    const totalWinRev    = wins.reduce((s, o) => s + o.revenue_total, 0)
-    const totalPipeRev   = pipeline.reduce((s, o) => s + o.revenue_total, 0)
-    const totalWinGP     = wins.reduce((s, o) => s + o.gross_profit, 0)
-    const avgMargin      = wins.length ? wins.reduce((s, o) => s + o.gross_margin_pct, 0) / wins.length : 0
-    const negMargin      = all.filter(o => o.is_negative_margin).length
-    const overdue        = pipeline.filter(o => o.is_overdue).length
-    const lostCount      = all.filter(o => o.normalised_status === 'lost').length
-    const wonCount       = wins.length
-    const winRate        = wonCount + lostCount > 0 ? (wonCount / (wonCount + lostCount)) * 100 : 0
-    const topCategories  = Object.entries(
+    const totalWinRev  = wins.reduce((s, o) => s + o.revenue_total, 0)
+    const totalPipeRev = pipeline.reduce((s, o) => s + o.revenue_total, 0)
+    const totalWinGP   = wins.reduce((s, o) => s + o.gross_profit, 0)
+    const avgMargin    = wins.length ? wins.reduce((s, o) => s + o.gross_margin_pct, 0) / wins.length : 0
+    const negMargin    = all.filter(o => o.is_negative_margin).length
+    const overdue      = pipeline.filter(o => o.is_overdue).length
+    const lostCount    = all.filter(o => o.normalised_status === 'lost').length
+    const wonCount     = wins.length
+    const winRate      = wonCount + lostCount > 0 ? (wonCount / (wonCount + lostCount)) * 100 : 0
+    const topCategories = Object.entries(
       wins.reduce((acc: Record<string, number>, o) => {
         const k = o.category ?? 'Uncategorised'
         acc[k] = (acc[k] ?? 0) + o.revenue_total
@@ -88,12 +88,12 @@ export default function JohnDashboard({
     return { totalWinRev, totalPipeRev, totalWinGP, avgMargin, negMargin, overdue, winRate, wonCount, lostCount, topCategories }
   }, [wins, pipeline, all])
 
-  const recentWins     = wins.slice(0, 10)
-  const topPipeline    = pipeline.slice(0, 10)
-
   return (
     <div className="space-y-5">
-      {/* Header */}
+      {/* Morning brief — always visible, above tabs */}
+      <MorningBrief all={all} wins={wins} pipeline={pipeline} />
+
+      {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">My Dashboard</h1>
@@ -124,15 +124,25 @@ export default function JohnDashboard({
       {/* ── SALES TAB ── */}
       {tab === 'sales' && (
         <div className="space-y-5">
+          {/* Stat cards */}
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <StatCard label="Total Wins Revenue"  value={euros(metrics.totalWinRev)}  sub={`${metrics.wonCount} deals closed`}   colour="border-green-500" />
-            <StatCard label="Pipeline Value"      value={euros(metrics.totalPipeRev)} sub={`${pipeline.length} active opps`}    colour="border-blue-500"  />
-            <StatCard label="Win Rate"            value={pct(metrics.winRate)}        sub={`${metrics.wonCount}W / ${metrics.lostCount}L`} colour="border-purple-500" />
-            <StatCard label="Avg Win Margin"      value={pct(metrics.avgMargin)}      sub="gross margin on wins"                colour="border-teal-500"  />
+            <StatCard label="Total Wins Revenue"  value={euros(metrics.totalWinRev)}  sub={`${metrics.wonCount} deals closed`}              colour="border-green-500" />
+            <StatCard label="Pipeline Value"      value={euros(metrics.totalPipeRev)} sub={`${pipeline.length} active opps`}               colour="border-blue-500"  />
+            <StatCard label="Win Rate"            value={pct(metrics.winRate)}        sub={`${metrics.wonCount}W / ${metrics.lostCount}L`}  colour="border-purple-500" />
+            <StatCard label="Avg Win Margin"      value={pct(metrics.avgMargin)}      sub="gross margin on wins"                            colour="border-teal-500"  />
           </div>
 
+          {/* Action list */}
+          <ActionList pipeline={pipeline} all={all} />
+
+          {/* Deal timeline */}
+          <DealTimeline pipeline={pipeline} />
+
+          {/* Win/Loss analysis */}
+          <WinLossAnalysis wins={wins} all={all} />
+
+          {/* Recent wins + top pipeline */}
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-            {/* Recent wins */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100">
               <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
                 <h2 className="font-semibold text-gray-900 text-sm">Recent Wins</h2>
@@ -149,8 +159,8 @@ export default function JohnDashboard({
                     <th className="py-2 px-3 text-left">Status</th>
                   </tr></thead>
                   <tbody className="divide-y divide-gray-50">
-                    {recentWins.map(o => <OppRow key={o.id} opp={o} />)}
-                    {recentWins.length === 0 && (
+                    {wins.slice(0, 8).map(o => <OppRow key={o.id} opp={o} />)}
+                    {wins.length === 0 && (
                       <tr><td colSpan={6} className="py-8 text-center text-sm text-gray-400">No wins data yet</td></tr>
                     )}
                   </tbody>
@@ -158,7 +168,6 @@ export default function JohnDashboard({
               </div>
             </div>
 
-            {/* Top pipeline */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100">
               <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
                 <h2 className="font-semibold text-gray-900 text-sm">Top Pipeline</h2>
@@ -175,8 +184,8 @@ export default function JohnDashboard({
                     <th className="py-2 px-3 text-left">Status</th>
                   </tr></thead>
                   <tbody className="divide-y divide-gray-50">
-                    {topPipeline.map(o => <OppRow key={o.id} opp={o} />)}
-                    {topPipeline.length === 0 && (
+                    {pipeline.slice(0, 8).map(o => <OppRow key={o.id} opp={o} />)}
+                    {pipeline.length === 0 && (
                       <tr><td colSpan={6} className="py-8 text-center text-sm text-gray-400">No pipeline data yet</td></tr>
                     )}
                   </tbody>
@@ -185,7 +194,7 @@ export default function JohnDashboard({
             </div>
           </div>
 
-          {/* Top categories */}
+          {/* Top categories bar */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
             <h2 className="font-semibold text-gray-900 text-sm mb-4">Top Categories by Won Revenue</h2>
             <div className="space-y-3">
@@ -212,33 +221,90 @@ export default function JohnDashboard({
       {tab === 'team' && (
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <StatCard label="Total Pipeline"   value={euros(metrics.totalPipeRev)} sub={`${pipeline.length} opportunities`} colour="border-blue-500"   />
-            <StatCard label="Total Won"        value={euros(metrics.totalWinRev)}  sub={`${metrics.wonCount} deals`}        colour="border-green-500"  />
-            <StatCard label="Overdue Opps"     value={String(metrics.overdue)}     sub="past projected close"               colour="border-red-400"    />
-            <StatCard label="Negative Margin"  value={String(metrics.negMargin)}   sub="deals needing review"               colour="border-amber-500"  />
+            <StatCard label="Total Pipeline"  value={euros(metrics.totalPipeRev)} sub={`${pipeline.length} opportunities`} colour="border-blue-500"   />
+            <StatCard label="Total Won"       value={euros(metrics.totalWinRev)}  sub={`${metrics.wonCount} deals`}        colour="border-green-500"  />
+            <StatCard label="Overdue Opps"    value={String(metrics.overdue)}     sub="past projected close"               colour="border-red-400"    />
+            <StatCard label="Negative Margin" value={String(metrics.negMargin)}   sub="deals needing review"               colour="border-amber-500"  />
           </div>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold text-gray-900 text-sm">Full Leadership Report</h2>
-              <Link href="/dashboard/leadership" className="text-xs bg-brand-500 text-white px-3 py-1.5 rounded-lg hover:bg-brand-600 transition-colors">
-                Open →
-              </Link>
+
+          {/* Rep scorecard */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+            <div className="px-5 py-4 border-b border-gray-100">
+              <h2 className="font-semibold text-gray-900 text-sm">Rep Scorecard</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Performance by opportunity owner</p>
             </div>
-            <p className="text-sm text-gray-500">The leadership report shows wins and pipeline broken down by category, customer, and rep. It includes targets overlays and chart breakdowns.</p>
-            <div className="mt-4 grid grid-cols-3 gap-3">
-              <Link href="/dashboard/leadership" className="block bg-gray-50 hover:bg-brand-50 border border-gray-200 hover:border-brand-200 rounded-lg p-3 transition-colors text-center">
-                <p className="text-xs font-medium text-gray-700">Leadership Report</p>
-                <p className="text-xs text-gray-400 mt-0.5">Wins &amp; pipeline by category</p>
-              </Link>
-              <Link href="/dashboard/retail-leadership" className="block bg-gray-50 hover:bg-brand-50 border border-gray-200 hover:border-brand-200 rounded-lg p-3 transition-colors text-center">
-                <p className="text-xs font-medium text-gray-700">Retail Leadership</p>
-                <p className="text-xs text-gray-400 mt-0.5">Retail-focused view</p>
-              </Link>
-              <Link href="/dashboard/weekly" className="block bg-gray-50 hover:bg-brand-50 border border-gray-200 hover:border-brand-200 rounded-lg p-3 transition-colors text-center">
-                <p className="text-xs font-medium text-gray-700">Weekly Report</p>
-                <p className="text-xs text-gray-400 mt-0.5">Week-on-week activity</p>
-              </Link>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead><tr className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                  <th className="py-2 px-4 text-left">Rep</th>
+                  <th className="py-2 px-4 text-right">Won Rev</th>
+                  <th className="py-2 px-4 text-right">Pipeline</th>
+                  <th className="py-2 px-4 text-right">Win Rate</th>
+                  <th className="py-2 px-4 text-right">Avg Deal</th>
+                  <th className="py-2 px-4 text-right">Avg GM%</th>
+                  <th className="py-2 px-4 text-right">Overdue</th>
+                </tr></thead>
+                <tbody className="divide-y divide-gray-50">
+                  {(() => {
+                    const repMap = new Map<string, { wins: Opportunity[]; pipe: Opportunity[]; losses: Opportunity[] }>()
+                    all.forEach(o => {
+                      const rep = o.opportunity_owner ?? o.account_manager ?? 'Unassigned'
+                      if (!repMap.has(rep)) repMap.set(rep, { wins: [], pipe: [], losses: [] })
+                      const r = repMap.get(rep)!
+                      if (o.normalised_status === 'won') r.wins.push(o)
+                      else if (o.normalised_status === 'lost') r.losses.push(o)
+                      else r.pipe.push(o)
+                    })
+                    return Array.from(repMap.entries())
+                      .sort((a, b) =>
+                        b[1].wins.reduce((s, o) => s + o.revenue_total, 0) -
+                        a[1].wins.reduce((s, o) => s + o.revenue_total, 0)
+                      )
+                      .map(([rep, d]) => {
+                        const wonRev  = d.wins.reduce((s, o) => s + o.revenue_total, 0)
+                        const pipeRev = d.pipe.reduce((s, o) => s + o.revenue_total, 0)
+                        const total   = d.wins.length + d.losses.length
+                        const wr      = total > 0 ? (d.wins.length / total) * 100 : 0
+                        const avgDeal = d.wins.length > 0 ? wonRev / d.wins.length : 0
+                        const avgGM   = d.wins.length > 0 ? d.wins.reduce((s, o) => s + o.gross_margin_pct, 0) / d.wins.length : 0
+                        const overdue = d.pipe.filter(o => o.is_overdue).length
+                        return (
+                          <tr key={rep} className="hover:bg-gray-50">
+                            <td className="py-2.5 px-4 text-sm font-medium text-gray-800">{rep}</td>
+                            <td className="py-2.5 px-4 text-sm text-right text-gray-900 font-medium">{euros(wonRev)}</td>
+                            <td className="py-2.5 px-4 text-sm text-right text-blue-600">{euros(pipeRev)}</td>
+                            <td className="py-2.5 px-4 text-sm text-right">
+                              <span className={`font-semibold ${wr >= 60 ? 'text-green-600' : wr >= 40 ? 'text-amber-600' : 'text-red-600'}`}>
+                                {total > 0 ? pct(wr) : '—'}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-4 text-sm text-right text-gray-600">{avgDeal > 0 ? euros(avgDeal) : '—'}</td>
+                            <td className="py-2.5 px-4 text-sm text-right text-gray-600">{d.wins.length > 0 ? pct(avgGM) : '—'}</td>
+                            <td className="py-2.5 px-4 text-sm text-right">
+                              {overdue > 0 ? <span className="text-red-600 font-semibold">{overdue}</span> : <span className="text-gray-300">—</span>}
+                            </td>
+                          </tr>
+                        )
+                      })
+                  })()}
+                </tbody>
+              </table>
             </div>
+          </div>
+
+          {/* Quick links to team reports */}
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { href: '/dashboard/leadership',       label: 'Leadership Report',  desc: 'Wins & pipeline by category' },
+              { href: '/dashboard/retail-leadership', label: 'Retail Leadership', desc: 'Retail-focused view'          },
+              { href: '/dashboard/weekly',            label: 'Weekly Report',     desc: 'Week-on-week activity'        },
+            ].map(l => (
+              <Link key={l.href} href={l.href}
+                className="block bg-white hover:bg-brand-50 border border-gray-200 hover:border-brand-200 rounded-xl p-4 transition-colors">
+                <p className="text-sm font-medium text-gray-700">{l.label}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{l.desc}</p>
+              </Link>
+            ))}
           </div>
         </div>
       )}
@@ -247,10 +313,10 @@ export default function JohnDashboard({
       {tab === 'ops' && (
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <StatCard label="Total Opportunities" value={String(all.length)}            sub="all time"                  colour="border-blue-500"   />
-            <StatCard label="Active Pipeline"     value={String(pipeline.length)}       sub="pipeline + on hold"        colour="border-teal-500"   />
-            <StatCard label="Overdue"             value={String(metrics.overdue)}       sub="past projected close date" colour="border-red-400"    />
-            <StatCard label="Negative Margin"     value={String(metrics.negMargin)}     sub="require pricing review"    colour="border-amber-500"  />
+            <StatCard label="Total Opportunities" value={String(all.length)}       sub="all time"                  colour="border-blue-500"   />
+            <StatCard label="Active Pipeline"     value={String(pipeline.length)}  sub="pipeline + on hold"        colour="border-teal-500"   />
+            <StatCard label="Overdue"             value={String(metrics.overdue)}  sub="past projected close date" colour="border-red-400"    />
+            <StatCard label="Negative Margin"     value={String(metrics.negMargin)} sub="require pricing review"   colour="border-amber-500"  />
           </div>
 
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -283,11 +349,11 @@ export default function JohnDashboard({
               <h2 className="font-semibold text-gray-900 text-sm mb-4">Data Health</h2>
               <div className="space-y-3">
                 {[
-                  { label: 'Missing cost data',    count: all.filter(o => o.cost_missing).length,        colour: 'text-amber-600' },
-                  { label: 'Negative margin deals', count: metrics.negMargin,                             colour: 'text-red-600'   },
-                  { label: 'Overdue pipeline',      count: metrics.overdue,                               colour: 'text-red-600'   },
-                  { label: 'No close date set',     count: all.filter(o => !o.projected_close_date).length, colour: 'text-amber-600' },
-                  { label: 'No category assigned',  count: all.filter(o => !o.category).length,           colour: 'text-gray-500'  },
+                  { label: 'Missing cost data',      count: all.filter(o => o.cost_missing).length,              colour: 'text-amber-600' },
+                  { label: 'Negative margin deals',  count: metrics.negMargin,                                    colour: 'text-red-600'   },
+                  { label: 'Overdue pipeline',       count: metrics.overdue,                                      colour: 'text-red-600'   },
+                  { label: 'No close date set',      count: all.filter(o => !o.projected_close_date).length,      colour: 'text-amber-600' },
+                  { label: 'No category assigned',   count: all.filter(o => !o.category).length,                  colour: 'text-gray-500'  },
                 ].map(({ label, count, colour }) => (
                   <div key={label} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
                     <span className="text-sm text-gray-600">{label}</span>
@@ -309,11 +375,12 @@ export default function JohnDashboard({
       {tab === 'financial' && (
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <StatCard label="Total Won Revenue"   value={euros(metrics.totalWinRev)}  sub={`${metrics.wonCount} deals`}      colour="border-green-500"  />
-            <StatCard label="Total Won GP"        value={euros(metrics.totalWinGP)}   sub="gross profit on wins"             colour="border-teal-500"   />
-            <StatCard label="Avg Win Margin"      value={pct(metrics.avgMargin)}      sub="across all wins"                  colour="border-blue-500"   />
-            <StatCard label="Pipeline at Risk"    value={euros(pipeline.filter(o => o.is_overdue || o.is_negative_margin).reduce((s, o) => s + o.revenue_total, 0))}
-                                                  sub="overdue or negative margin"    colour="border-red-400"    />
+            <StatCard label="Total Won Revenue"  value={euros(metrics.totalWinRev)}  sub={`${metrics.wonCount} deals`}      colour="border-green-500"  />
+            <StatCard label="Total Won GP"       value={euros(metrics.totalWinGP)}   sub="gross profit on wins"             colour="border-teal-500"   />
+            <StatCard label="Avg Win Margin"     value={pct(metrics.avgMargin)}      sub="across all wins"                  colour="border-blue-500"   />
+            <StatCard label="Pipeline at Risk"
+              value={euros(pipeline.filter(o => o.is_overdue || o.is_negative_margin).reduce((s, o) => s + o.revenue_total, 0))}
+              sub="overdue or negative margin"  colour="border-red-400"    />
           </div>
 
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -321,11 +388,11 @@ export default function JohnDashboard({
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
               <h2 className="font-semibold text-gray-900 text-sm mb-4">Win Margin Distribution</h2>
               {[
-                { label: '> 30%',    filter: (o: Opportunity) => o.gross_margin_pct > 30,                colour: 'bg-green-500'  },
+                { label: '> 30%',    filter: (o: Opportunity) => o.gross_margin_pct > 30,                           colour: 'bg-green-500'  },
                 { label: '20–30%',   filter: (o: Opportunity) => o.gross_margin_pct >= 20 && o.gross_margin_pct <= 30, colour: 'bg-teal-400'   },
                 { label: '10–20%',   filter: (o: Opportunity) => o.gross_margin_pct >= 10 && o.gross_margin_pct < 20,  colour: 'bg-amber-400'  },
                 { label: '0–10%',    filter: (o: Opportunity) => o.gross_margin_pct >= 0  && o.gross_margin_pct < 10,  colour: 'bg-orange-400' },
-                { label: 'Negative', filter: (o: Opportunity) => o.gross_margin_pct < 0,                 colour: 'bg-red-500'    },
+                { label: 'Negative', filter: (o: Opportunity) => o.gross_margin_pct < 0,                            colour: 'bg-red-500'    },
               ].map(({ label, filter, colour }) => {
                 const bucket = wins.filter(filter)
                 const rev    = bucket.reduce((s, o) => s + o.revenue_total, 0)
@@ -346,12 +413,12 @@ export default function JohnDashboard({
             {/* Commission placeholder */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
               <h2 className="font-semibold text-gray-900 text-sm mb-1">Commission Tracker</h2>
-              <p className="text-xs text-gray-400 mb-4">Phase 3 — coming soon</p>
+              <p className="text-xs text-gray-400 mb-4">Phase 3 &mdash; coming soon</p>
               <div className="rounded-lg bg-gray-50 border border-dashed border-gray-200 p-6 text-center">
-                <p className="text-2xl mb-2">💰</p>
+                <p className="text-2xl mb-2">&#128176;</p>
                 <p className="text-sm font-medium text-gray-700">Commission engine in Phase 3</p>
                 <p className="text-xs text-gray-400 mt-1">Earnings, commission rates, and payout tracking will appear here once configured.</p>
-                <Link href="/dashboard/commission" className="inline-block mt-3 text-xs text-brand-500 hover:underline">Preview commission page →</Link>
+                <Link href="/dashboard/commission" className="inline-block mt-3 text-xs text-brand-500 hover:underline">Preview commission page</Link>
               </div>
             </div>
           </div>
@@ -360,19 +427,19 @@ export default function JohnDashboard({
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <h2 className="font-semibold text-gray-900 text-sm">Targets</h2>
-                <p className="text-xs text-gray-400">Phase 2 — configure in Targets admin</p>
+                <h2 className="font-semibold text-gray-900 text-sm">Targets vs. Actuals</h2>
+                <p className="text-xs text-gray-400">Phase 3 &mdash; configure targets to see progress vs. goal</p>
               </div>
-              <Link href="/dashboard/targets" className="text-xs text-brand-500 hover:underline">Manage targets →</Link>
+              <Link href="/dashboard/targets" className="text-xs text-brand-500 hover:underline">Manage targets</Link>
             </div>
             <div className="rounded-lg bg-gray-50 border border-dashed border-gray-200 p-5 text-center">
-              <p className="text-sm text-gray-500">Set up category targets to see progress vs. goal here.</p>
+              <p className="text-sm text-gray-500">Once targets are configured, this panel will show RAG status per category and pipeline coverage ratio.</p>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── MARKETING TAB ── */}
+      {/* MARKETING TAB */}
       {tab === 'marketing' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
@@ -381,7 +448,7 @@ export default function JohnDashboard({
               <p className="text-xs text-gray-400 mt-0.5">ICT Services eMDF &amp; pbMDF EMEA funds tracker</p>
             </div>
             <a href="/dell-mdf-dashboard.html" target="_blank" rel="noopener noreferrer"
-               className="text-xs text-brand-500 hover:underline">Open full screen →</a>
+               className="text-xs text-brand-500 hover:underline">Open full screen</a>
           </div>
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" style={{ height: '780px' }}>
             <iframe
