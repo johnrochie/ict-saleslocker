@@ -1,5 +1,5 @@
 // ============================================================
-// ICT SalesLocker — GET /api/autotask/probe
+// ICT SalesIQ — GET /api/autotask/probe
 // Temporary diagnostic: discover an Autotask entity's fields
 // and return a sample of records. Admin only. Delete after use.
 // Usage: GET /api/autotask/probe?entity=SalesActivities

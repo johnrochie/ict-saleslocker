@@ -239,7 +239,7 @@ export default function LeadershipClient({ winsData, pipeData, categoryTargets, 
         <div className="ld-topbar">
           <div>
             <h1>ICT Services &nbsp;|&nbsp; <em>{reportTitle || 'Sales Leadership Report'}</em></h1>
-            <p>Live data from SalesLocker &mdash; {recordCount} records loaded &mdash; Wins &amp; Pipeline by Category and Customer</p>
+            <p>Live data from ICT SalesIQ &mdash; {recordCount} records loaded &mdash; Wins &amp; Pipeline by Category and Customer</p>
           </div>
           <div className="ld-topbar-right">
             <div className="period-row">
@@ -287,7 +287,7 @@ export default function LeadershipClient({ winsData, pipeData, categoryTargets, 
               <input type="file" accept=".csv,.CSV"
                 onChange={(e) => { const f = e.target.files?.[0]; if(f && (window as any).readFile) (window as any).readFile(f,'pipe'); (e.target as HTMLInputElement).value = '' }} />
             </div>
-            <div className="lb-msg" id="lbMsg">Data loaded from SalesLocker — drop CSVs to override</div>
+            <div className="lb-msg" id="lbMsg">Data loaded from ICT SalesIQ — drop CSVs to override</div>
           </div>
         </div>
 
@@ -296,7 +296,7 @@ export default function LeadershipClient({ winsData, pipeData, categoryTargets, 
           <div className="wrapper">
             <div className="placeholder">
               <h2>Loading dashboard data...</h2>
-              <p>Connecting to SalesLocker data. This should only take a moment.</p>
+              <p>Connecting to ICT SalesIQ data. This should only take a moment.</p>
             </div>
           </div>
         </div>

@@ -1,5 +1,5 @@
 // ============================================================
-// ICT SalesLocker — Formatting Utilities
+// ICT SalesIQ — Formatting Utilities
 // ============================================================
 
 // Euro currency formatter

@@ -1,5 +1,5 @@
 // ============================================================
-// ICT SalesLocker — Autotask CSV Parser & Ingest Engine
+// ICT SalesIQ — Autotask CSV Parser & Ingest Engine
 // ============================================================
 // Handles:
 //  - Euro currency strings  (€1,234,567.89 → number)
@@ -95,7 +95,7 @@ function buildCompositeKey(row: AutotaskCsvRow): string {
 }
 
 // ── Status normalisation ─────────────────────────────────────
-// Maps raw Autotask status + stage → SalesLocker normalised_status
+// Maps raw Autotask status + stage → ICT SalesIQ normalised_status
 function normaliseStatus(row: AutotaskCsvRow): NormalisedStatus {
   const status = (row.Status || '').trim()
   const stage  = (row.Stage  || '').trim()

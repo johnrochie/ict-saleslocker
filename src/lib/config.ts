@@ -1,5 +1,5 @@
 // ============================================================
-// ICT SalesLocker -- Shared Configuration
+// ICT SalesIQ -- Shared Configuration
 // Single source of truth for team membership and shared utilities
 // Update this file when the sales team changes
 // ============================================================

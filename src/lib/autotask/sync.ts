@@ -1,5 +1,5 @@
 // ============================================================
-// ICT SalesLocker — Autotask Sync Orchestrator
+// ICT SalesIQ — Autotask Sync Orchestrator
 // v5 — always full sync (Opportunities has no lastModifiedDate)
 // ============================================================
 

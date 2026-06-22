@@ -1,5 +1,5 @@
 // ============================================================
-// ICT SalesLocker — Core Types
+// ICT SalesIQ — Core Types
 // ============================================================
 
 export type NormalisedStatus =

@@ -1,5 +1,5 @@
 // ============================================================
-// ICT SalesLocker — Autotask REST API Client
+// ICT SalesIQ — Autotask REST API Client
 // ============================================================
 
 import type { AutotaskField, AutotaskQueryResponse } from './types'

@@ -1,5 +1,5 @@
 // ============================================================
-// ICT SalesLocker — POST /api/autotask/sync  (manual trigger)
+// ICT SalesIQ — POST /api/autotask/sync  (manual trigger)
 //                   GET  /api/autotask/sync  (Vercel cron)
 // ============================================================
 // Manual POST: requires admin or sales_manager session

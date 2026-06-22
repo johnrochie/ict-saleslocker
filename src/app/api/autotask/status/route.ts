@@ -1,5 +1,5 @@
 // ============================================================
-// ICT SalesLocker — GET /api/autotask/status
+// ICT SalesIQ — GET /api/autotask/status
 // ============================================================
 // Returns Autotask sync configuration status + last sync info.
 // Used by the Upload Data page to show current state.

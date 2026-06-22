@@ -1,5 +1,5 @@
 // ============================================================
-// ICT SalesLocker — Autotask API → DB Record Transformer
+// ICT SalesIQ — Autotask API → DB Record Transformer
 // ============================================================
 // Converts a raw AutotaskOpportunity (from REST API) into the
 // same DB record shape produced by the CSV parser.

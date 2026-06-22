@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'ICT SalesLocker',
+  title: 'ICT SalesIQ',
   description: 'ICT Services — Sales Operations Platform',
 }
 

@@ -1,5 +1,5 @@
 // ============================================================
-// ICT SalesLocker — Autotask Picklist Resolution
+// ICT SalesIQ — Autotask Picklist Resolution
 // ============================================================
 // Fetches entity field definitions and builds label maps.
 // These are installation-specific, so we fetch live per sync.

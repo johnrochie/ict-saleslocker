@@ -44,7 +44,7 @@ export default function LoginPage() {
         </div>
         <div>
           <h1 className="text-4xl font-bold text-white leading-tight mb-4">
-            SalesLocker
+            ICT SalesIQ
           </h1>
           <p className="text-blue-200 text-lg leading-relaxed max-w-sm">
             Your single view of pipeline, revenue, and performance.
@@ -73,7 +73,7 @@ export default function LoginPage() {
 
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-navy-700">Sign in</h2>
-            <p className="text-body text-sm mt-1">Access your SalesLocker dashboard</p>
+            <p className="text-body text-sm mt-1">Access your ICT SalesIQ dashboard</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">

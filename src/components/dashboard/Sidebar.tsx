@@ -82,7 +82,7 @@ export default function Sidebar({ userEmail, userName, userRole }: { userEmail: 
           onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
         <div className="flex items-center gap-2 mt-2">
           <div className="w-4 h-0.5 bg-brand-500" />
-          <span className="text-xs font-semibold text-navy-700 tracking-wider uppercase">SalesLocker</span>
+          <span className="text-xs font-semibold text-navy-700 tracking-wider uppercase">ICT SalesIQ</span>
           <div className="w-4 h-0.5 bg-brand-500" />
         </div>
       </div>

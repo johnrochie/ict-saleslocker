@@ -1,5 +1,5 @@
 // ============================================================
-// ICT SalesLocker — Autotask REST API Types
+// ICT SalesIQ — Autotask REST API Types
 // ============================================================
 
 // ── Raw API response shape for Opportunities ─────────────────
