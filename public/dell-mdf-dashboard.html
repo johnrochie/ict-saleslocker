@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dell MDF Funding Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f4f6f9;
+    color: #1a1a2e;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .header h1 { font-size: 22px; font-weight: 700; color: #1a1a2e; }
+  .header .subtitle { font-size: 13px; color: #6b7280; margin-top: 2px; }
+  .dell-badge {
+    background: #007DB8;
+    color: white;
+    padding: 6px 18px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .summary-card {
+    background: white;
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    border-left: 4px solid transparent;
+  }
+  .summary-card.blue  { border-left-color: #007DB8; }
+  .summary-card.green { border-left-color: #10b981; }
+  .summary-card.amber { border-left-color: #f59e0b; }
+  .summary-card.red   { border-left-color: #ef4444; }
+  .summary-card .label {
+    font-size: 11px; font-weight: 600; color: #6b7280;
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;
+  }
+  .summary-card .value { font-size: 22px; font-weight: 700; color: #1a1a2e; }
+  .summary-card .meta { font-size: 11px; color: #9ca3af; margin-top: 3px; }
+
+  .urgency-banner {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .urgency-banner .icon { font-size: 16px; }
+  .urgency-banner .text { font-size: 13px; color: #991b1b; }
+  .urgency-banner .text strong { font-weight: 700; }
+
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 18px;
+  }
+
+  .section-title {
+    font-size: 11px; font-weight: 700; color: #6b7280;
+    text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px;
+  }
+
+  .fund-card {
+    background: white;
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    border: 1px solid #f0f0f0;
+    transition: box-shadow 0.2s;
+  }
+  .fund-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.09); }
+
+  .fund-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 14px;
+  }
+  .fund-name { font-size: 14px; font-weight: 700; color: #1a1a2e; }
+  .fund-type { font-size: 11px; color: #6b7280; margin-top: 2px; }
+
+  .deadline-badge {
+    font-size: 11px; font-weight: 700;
+    padding: 4px 10px; border-radius: 20px;
+  }
+  .deadline-urgent { background: #fef2f2; color: #dc2626; }
+  .deadline-medium  { background: #fffbeb; color: #d97706; }
+  .deadline-ok      { background: #f0fdf4; color: #16a34a; }
+  .deadline-date    { font-size: 11px; color: #9ca3af; text-align: right; margin-top: 3px; }
+
+  .fund-amounts {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .amt-label { font-size: 10px; color: #9ca3af; margin-bottom: 2px; }
+  .amt-value { font-size: 16px; font-weight: 700; color: #1a1a2e; }
+  .amt-value.red   { color: #ef4444; }
+  .amt-value.green { color: #10b981; }
+
+  .progress-bar-wrap {
+    background: #f3f4f6; border-radius: 4px; height: 5px;
+    margin-bottom: 5px; overflow: hidden;
+  }
+  .progress-bar { height: 100%; border-radius: 4px; transition: width 0.5s; }
+  .progress-labels {
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: #9ca3af; margin-bottom: 10px;
+  }
+
+  .fund-actions { display: flex; gap: 8px; }
+  .btn {
+    border: none; padding: 6px 14px; border-radius: 6px;
+    font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.15s;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn-primary   { background: #007DB8; color: white; }
+  .btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
+
+  /* Sidebar */
+  .sidebar-card {
+    background: white;
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    margin-bottom: 14px;
+  }
+  .chart-wrapper { position: relative; height: 200px; }
+
+  .activity-item {
+    padding: 9px 0;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 12px;
+  }
+  .activity-item:last-child { border-bottom: none; }
+  .activity-top { display: flex; justify-content: space-between; align-items: baseline; }
+  .activity-fund { font-size: 10px; font-weight: 700; color: #007DB8; margin-bottom: 2px; }
+  .activity-desc { color: #374151; font-weight: 500; }
+  .activity-amount { font-weight: 700; color: #ef4444; white-space: nowrap; margin-left: 8px; }
+  .activity-meta { font-size: 10px; color: #9ca3af; margin-top: 3px; }
+  .activity-del { color: #ef4444; cursor: pointer; margin-left: 6px; font-size: 10px; }
+  .no-activity { color: #9ca3af; font-size: 12px; text-align: center; padding: 20px 0; }
+
+  /* Timeline bar */
+  .timeline-item {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 10px; font-size: 12px;
+  }
+  .tl-label { width: 120px; color: #374151; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tl-bar-wrap { flex: 1; background: #f3f4f6; border-radius: 4px; height: 8px; overflow: hidden; }
+  .tl-bar { height: 100%; border-radius: 4px; }
+  .tl-days { width: 60px; text-align: right; color: #6b7280; font-size: 11px; white-space: nowrap; }
+
+  /* Modal */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.35); z-index: 1000;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: white; border-radius: 16px;
+    padding: 26px; width: 400px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+  }
+  .modal h3 { font-size: 16px; font-weight: 700; margin-bottom: 18px; color: #1a1a2e; }
+  .form-group { margin-bottom: 14px; }
+  .form-group label {
+    display: block; font-size: 11px; font-weight: 700;
+    color: #374151; margin-bottom: 5px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .form-group input, .form-group select, .form-group textarea {
+    width: 100%; padding: 9px 12px;
+    border: 1px solid #e5e7eb; border-radius: 8px;
+    font-size: 14px; color: #1a1a2e; outline: none;
+    transition: border-color 0.2s;
+    font-family: inherit;
+  }
+  .form-group input:focus, .form-group select:focus { border-color: #007DB8; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+  .btn-modal-cancel { background: #f3f4f6; color: #374151; border: none; padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .btn-modal-save   { background: #007DB8; color: white; border: none; padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>Dell MDF Funding Dashboard</h1>
+    <div class="subtitle">ICT Services (1703215517) &middot; eMDF &amp; pbMDF EMEA Funds</div>
+  </div>
+  <div class="dell-badge">DELL</div>
+</div>
+
+<div class="urgency-banner" id="urgencyBanner" style="display:none">
+  <span class="icon">⚠️</span>
+  <span class="text" id="urgencyText"></span>
+</div>
+
+<div class="summary-grid">
+  <div class="summary-card blue">
+    <div class="label">Total Allocated</div>
+    <div class="value">€40,176.27</div>
+    <div class="meta">Across 4 active funds</div>
+  </div>
+  <div class="summary-card green">
+    <div class="label">Total Available</div>
+    <div class="value">€35,044.24</div>
+    <div class="meta">87.2% of allocated</div>
+  </div>
+  <div class="summary-card amber">
+    <div class="label">Logged Spend</div>
+    <div class="value" id="totalSpentStat">€0.00</div>
+    <div class="meta">From activity log</div>
+  </div>
+  <div class="summary-card red">
+    <div class="label">Nearest Deadline</div>
+    <div class="value" id="nearestDeadlineStat">—</div>
+    <div class="meta" id="nearestDeadlineMeta"></div>
+  </div>
+</div>
+
+<div class="main-grid">
+  <div>
+    <div class="section-title">Active Funds</div>
+    <div id="fundsContainer"></div>
+  </div>
+
+  <div>
+    <div class="sidebar-card">
+      <div class="section-title">Budget Breakdown</div>
+      <div class="chart-wrapper">
+        <canvas id="budgetChart"></canvas>
+      </div>
+    </div>
+
+    <div class="sidebar-card">
+      <div class="section-title">Deadline Timeline</div>
+      <div id="timelineContainer"></div>
+    </div>
+
+    <div class="sidebar-card">
+      <div class="section-title">Activity Log</div>
+      <div id="activityLog"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="spendModal">
+  <div class="modal">
+    <h3>Log Expenditure</h3>
+    <input type="hidden" id="mFundId">
+    <div class="form-group">
+      <label>Fund</label>
+      <input type="text" id="mFundName" readonly style="background:#f9fafb; color:#6b7280">
+    </div>
+    <div class="form-group">
+      <label>Amount (€)</label>
+      <input type="number" id="mAmount" placeholder="0.00" step="0.01" min="0.01">
+    </div>
+    <div class="form-group">
+      <label>Campaign / Description</label>
+      <input type="text" id="mDesc" placeholder="e.g. LinkedIn sponsored post, event sponsorship...">
+    </div>
+    <div class="form-group">
+      <label>Date</label>
+      <input type="date" id="mDate">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-modal-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-modal-save" onclick="logSpend()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = 'ict_dell_mdf_activity_v1';
+const TODAY = new Date('2026-06-22');
+
+const funds = [
+  { id:'fy26q3', name:'FY26Q3_eMDF_EMEA_SP', type:'Earned Solution Provider', allocated:3394.63, available:3394.63, deadline:'2026-07-31', color:'#ef4444' },
+  { id:'fy26q4', name:'FY26Q4_eMDF_EMEA_SP', type:'Earned Solution Provider', allocated:9367.86, available:9367.86, deadline:'2026-10-30', color:'#10b981' },
+  { id:'fy27q1', name:'FY27Q1_eMDF_EMEA_SP', type:'Earned Solution Provider', allocated:22281.75, available:22281.75, deadline:'2027-01-29', color:'#8b5cf6' },
+  { id:'fy27q2', name:'FY27Q2_pbMDF_ISG',    type:'Proposal Channel',         allocated:5132.03,  available:0.00,     deadline:'2026-09-14', color:'#f59e0b' },
+];
+
+function daysUntil(ds) {
+  return Math.round((new Date(ds) - TODAY) / 86400000);
+}
+function fmt(n) {
+  return '€' + Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+function getLog() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; }
+}
+function saveLog(l) { localStorage.setItem(STORAGE_KEY, JSON.stringify(l)); }
+function spentFor(id) { return getLog().filter(a=>a.fundId===id).reduce((s,a)=>s+a.amount,0); }
+function totalSpent() { return getLog().reduce((s,a)=>s+a.amount,0); }
+
+// ---- Urgency banner ----
+function renderBanner() {
+  const urgent = funds.filter(f => daysUntil(f.deadline) <= 45 && f.available > 0)
+                      .sort((a,b) => daysUntil(a.deadline) - daysUntil(b.deadline))[0];
+  const banner = document.getElementById('urgencyBanner');
+  if (!urgent) { banner.style.display='none'; return; }
+  const days = daysUntil(urgent.deadline);
+  banner.style.display='flex';
+  document.getElementById('urgencyText').innerHTML =
+    `<strong>Action required:</strong> <strong>${urgent.name}</strong> has ${fmt(urgent.available)} available — claim deadline is <strong>${urgent.deadline}</strong> (${days} days away). Plan your spend now.`;
+}
+
+// ---- Summary stats ----
+function renderStats() {
+  document.getElementById('totalSpentStat').textContent = fmt(totalSpent());
+  const sorted = funds.slice().sort((a,b) => daysUntil(a.deadline) - daysUntil(b.deadline));
+  const next = sorted[0];
+  const days = daysUntil(next.deadline);
+  document.getElementById('nearestDeadlineStat').textContent = days + ' days';
+  document.getElementById('nearestDeadlineMeta').textContent = next.name.split('_').slice(0,2).join('_') + ' · ' + next.deadline;
+}
+
+// ---- Fund cards ----
+function renderFunds() {
+  const c = document.getElementById('fundsContainer');
+  c.innerHTML = '';
+  funds.forEach(f => {
+    const days = daysUntil(f.deadline);
+    const spent = spentFor(f.id);
+    const remaining = Math.max(0, f.available - spent);
+    const pctSpent = f.allocated > 0 ? Math.min(100, (spent / f.allocated * 100)) : 0;
+    const dlClass = days <= 45 ? 'deadline-urgent' : days <= 90 ? 'deadline-medium' : 'deadline-ok';
+    const barColor = days <= 45 ? '#ef4444' : days <= 90 ? '#f59e0b' : '#10b981';
+    const dlLabel = days < 0 ? 'Expired' : days === 0 ? 'Due today' : days + ' days left';
+
+    const d = document.createElement('div');
+    d.className = 'fund-card';
+    d.innerHTML = `
+      <div class="fund-header">
+        <div>
+          <div class="fund-name">${f.name}</div>
+          <div class="fund-type">${f.type}</div>
+        </div>
+        <div>
+          <span class="deadline-badge ${dlClass}">${dlLabel}</span>
+          <div class="deadline-date">${f.deadline}</div>
+        </div>
+      </div>
+      <div class="fund-amounts">
+        <div>
+          <div class="amt-label">Allocated</div>
+          <div class="amt-value">${fmt(f.allocated)}</div>
+        </div>
+        <div>
+          <div class="amt-label">Available</div>
+          <div class="amt-value">${fmt(f.available)}</div>
+        </div>
+        <div>
+          <div class="amt-label">Logged Spend</div>
+          <div class="amt-value red">${fmt(spent)}</div>
+        </div>
+        <div>
+          <div class="amt-label">Est. Remaining</div>
+          <div class="amt-value ${remaining < f.available * 0.2 ? 'red' : 'green'}">${fmt(remaining)}</div>
+        </div>
+      </div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar" style="width:${pctSpent}%; background:${barColor}"></div>
+      </div>
+      <div class="progress-labels">
+        <span>${pctSpent.toFixed(1)}% spent</span>
+        <span>${(100 - pctSpent).toFixed(1)}% remaining</span>
+      </div>
+      <div class="fund-actions">
+        <button class="btn btn-primary" onclick="openModal('${f.id}','${f.name}')">+ Log Spend</button>
+      </div>
+    `;
+    c.appendChild(d);
+  });
+}
+
+// ---- Deadline timeline ----
+function renderTimeline() {
+  const maxDays = 240;
+  const c = document.getElementById('timelineContainer');
+  const sorted = funds.slice().sort((a,b) => daysUntil(a.deadline) - daysUntil(b.deadline));
+  c.innerHTML = sorted.map(f => {
+    const days = daysUntil(f.deadline);
+    const pct = Math.min(100, Math.max(2, days / maxDays * 100));
+    const barColor = days <= 45 ? '#ef4444' : days <= 90 ? '#f59e0b' : '#10b981';
+    const shortName = f.name.split('_').slice(0,2).join('_');
+    return `<div class="timeline-item">
+      <div class="tl-label" title="${f.name}">${shortName}</div>
+      <div class="tl-bar-wrap"><div class="tl-bar" style="width:${pct}%; background:${barColor}"></div></div>
+      <div class="tl-days">${days < 0 ? 'Expired' : days + 'd'}</div>
+    </div>`;
+  }).join('');
+}
+
+// ---- Activity log ----
+function renderActivity() {
+  const log = getLog().slice().reverse();
+  const c = document.getElementById('activityLog');
+  if (!log.length) {
+    c.innerHTML = '<div class="no-activity">No activity logged yet.<br>Use "+ Log Spend" on a fund card to record an expense.</div>';
+    return;
+  }
+  c.innerHTML = log.map((item, i) => `
+    <div class="activity-item">
+      <div class="activity-fund">${item.fundName}</div>
+      <div class="activity-top">
+        <span class="activity-desc">${item.desc}</span>
+        <span class="activity-amount">${fmt(item.amount)}</span>
+      </div>
+      <div class="activity-meta">${item.date} <span class="activity-del" onclick="deleteItem(${getLog().length - 1 - i})">✕ remove</span></div>
+    </div>
+  `).join('');
+}
+
+function deleteItem(idx) {
+  if (!confirm('Remove this activity?')) return;
+  const log = getLog(); log.splice(idx, 1); saveLog(log); refresh();
+}
+
+// ---- Chart ----
+let chartInst = null;
+function renderChart() {
+  const ctx = document.getElementById('budgetChart').getContext('2d');
+  const labels = funds.map(f => f.name.split('_').slice(0,2).join('_'));
+  const avail   = funds.map(f => Math.max(0, f.available - spentFor(f.id)));
+  const spent   = funds.map(f => spentFor(f.id));
+  const commit  = funds.map(f => f.allocated - f.available);
+
+  if (chartInst) chartInst.destroy();
+  chartInst = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label:'Available',     data: avail,  backgroundColor:'#007DB8', borderRadius:3 },
+        { label:'Logged Spend',  data: spent,  backgroundColor:'#ef4444', borderRadius:3 },
+        { label:'Pre-committed', data: commit, backgroundColor:'#e5e7eb', borderRadius:3 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position:'bottom', labels:{ font:{size:10}, boxWidth:10, padding:8 } },
+        tooltip: { callbacks: { label: c => ` ${c.dataset.label}: €${c.raw.toLocaleString('en-IE',{minimumFractionDigits:2,maximumFractionDigits:2})}` } }
+      },
+      scales: {
+        x: { stacked:true, ticks:{font:{size:9}} },
+        y: { stacked:true, ticks:{ callback: v => '€'+(v/1000).toFixed(0)+'k', font:{size:9} } }
+      }
+    }
+  });
+}
+
+// ---- Modal ----
+function openModal(fundId, fundName) {
+  document.getElementById('mFundId').value = fundId;
+  document.getElementById('mFundName').value = fundName;
+  document.getElementById('mAmount').value = '';
+  document.getElementById('mDesc').value = '';
+  document.getElementById('mDate').value = '2026-06-22';
+  document.getElementById('spendModal').classList.add('active');
+  setTimeout(() => document.getElementById('mAmount').focus(), 50);
+}
+function closeModal() { document.getElementById('spendModal').classList.remove('active'); }
+
+function logSpend() {
+  const fundId   = document.getElementById('mFundId').value;
+  const fundName = document.getElementById('mFundName').value;
+  const amount   = parseFloat(document.getElementById('mAmount').value);
+  const desc     = document.getElementById('mDesc').value.trim();
+  const date     = document.getElementById('mDate').value;
+  if (!amount || amount <= 0) { alert('Please enter a valid amount.'); return; }
+  if (!desc)  { alert('Please add a description.'); return; }
+  if (!date)  { alert('Please select a date.'); return; }
+  const log = getLog();
+  log.push({ fundId, fundName, amount, desc, date });
+  saveLog(log);
+  closeModal();
+  refresh();
+}
+
+document.getElementById('spendModal').addEventListener('click', e => { if (e.target.id === 'spendModal') closeModal(); });
+
+// ---- Refresh all ----
+function refresh() {
+  renderBanner();
+  renderStats();
+  renderFunds();
+  renderTimeline();
+  renderActivity();
+  renderChart();
+}
+
+refresh();
+</script>
+</body>
+</html>

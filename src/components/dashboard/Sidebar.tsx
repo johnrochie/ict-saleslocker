@@ -87,7 +87,34 @@ export default function Sidebar({ userEmail, userName, userRole }: { userEmail: 
         </div>
       </div>
 
-      <nav className="flex-1 px-3 py-4 space-y-0.5">
+      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
+        {/* My Dashboard */}
+        <div className="px-3 pb-1 pt-0.5">
+          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">My Dashboard</span>
+        </div>
+        {(() => {
+          const isActive = pathname.startsWith('/dashboard/john')
+          return (
+            <Link href="/dashboard/john"
+              className={cn('flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                isActive ? 'bg-brand-50 text-brand-600' : 'text-gray-600 hover:bg-gray-50 hover:text-navy-700')}>
+              <span className={isActive ? 'text-brand-500' : 'text-gray-400'}>
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </span>
+              John Roche
+            </Link>
+          )
+        })()}
+
+        {/* Divider */}
+        <div className="px-3 pt-3 pb-1">
+          <div className="border-t border-gray-100 pt-3">
+            <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">ICT SalesIQ</span>
+          </div>
+        </div>
+
         {visibleItems.map(item => {
           const isActive = item.href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(item.href)
           return (
