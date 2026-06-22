@@ -3,7 +3,6 @@
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { Opportunity } from '@/types'
-import { fmt } from '@/lib/utils/formatting'
 
 // ─── helpers ────────────────────────────────────────────────
 function euros(n: number) {
