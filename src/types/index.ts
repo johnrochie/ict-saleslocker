@@ -136,6 +136,25 @@ export interface AutotaskCsvRow {
   Rating: string
 }
 
+// -- PO Approval ---------------------------------------------
+export interface POApproval {
+  id: string
+  opportunity_id: string
+  autotask_id: number | null
+  company: string | null
+  opportunity_name: string | null
+  requested_by: string
+  requested_at: string
+  status: 'pending' | 'approved' | 'rejected'
+  reviewed_by: string | null
+  reviewed_at: string | null
+  notes: string | null
+  gross_margin_pct: number | null
+  revenue_total: number | null
+  created_at: string
+  updated_at: string
+}
+
 // -- Import Result -------------------------------------------
 export interface ImportResult {
   rows_processed: number

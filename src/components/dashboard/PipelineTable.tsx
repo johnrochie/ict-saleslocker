@@ -9,18 +9,49 @@ import type { Opportunity } from '@/types'
 
 interface PipelineTableProps {
   opportunities: Opportunity[]
+  poApprovalThreshold?: number          // margin % below which approval is needed
+  existingApprovals?: Record<string, 'pending' | 'approved' | 'rejected'>  // opportunity_id → status
 }
 
 type SortField = 'revenue_total' | 'projected_close_date' | 'company' | 'gross_margin_pct'
 type SortDir   = 'asc' | 'desc'
 
-export default function PipelineTable({ opportunities }: PipelineTableProps) {
+export default function PipelineTable({
+  opportunities,
+  poApprovalThreshold,
+  existingApprovals = {},
+}: PipelineTableProps) {
   const [search,       setSearch]       = useState('')
   const [filterOwner,  setFilterOwner]  = useState('')
   const [filterCat,    setFilterCat]    = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [sortField,    setSortField]    = useState<SortField>('revenue_total')
   const [sortDir,      setSortDir]      = useState<SortDir>('desc')
+  const [requestingId, setRequestingId] = useState<string | null>(null)
+  const [approvalMap,  setApprovalMap]  = useState<Record<string, 'pending' | 'approved' | 'rejected'>>(existingApprovals)
+  const [flash,        setFlash]        = useState<string | null>(null)
+
+  function showFlash(msg: string) {
+    setFlash(msg)
+    setTimeout(() => setFlash(null), 3000)
+  }
+
+  async function requestApproval(oppId: string) {
+    setRequestingId(oppId)
+    try {
+      const res = await fetch('/api/po-approvals/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ opportunity_id: oppId }),
+      })
+      const json = await res.json()
+      if (!res.ok) { showFlash(json.error ?? 'Request failed'); return }
+      setApprovalMap(prev => ({ ...prev, [oppId]: 'pending' }))
+      showFlash('Approval request submitted')
+    } finally {
+      setRequestingId(null)
+    }
+  }
 
   // Unique filter options
   const owners = useMemo(() => {
@@ -82,6 +113,13 @@ export default function PipelineTable({ opportunities }: PipelineTableProps) {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200">
+
+      {/* Flash */}
+      {flash && (
+        <div className="mx-4 mt-4 rounded-lg bg-green-50 border border-green-200 px-4 py-2 text-sm text-green-700">
+          {flash}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 p-4 border-b border-gray-100">
@@ -161,6 +199,9 @@ export default function PipelineTable({ opportunities }: PipelineTableProps) {
                 </button>
               </th>
               <th className="text-center px-4 py-3">Flags</th>
+              {poApprovalThreshold != null && (
+                <th className="text-center px-4 py-3">PO Approval</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
@@ -238,6 +279,47 @@ export default function PipelineTable({ opportunities }: PipelineTableProps) {
                         )}
                       </div>
                     </td>
+                    {poApprovalThreshold != null && (() => {
+                      const needsApproval = !opp.cost_missing &&
+                        opp.gross_margin_pct < poApprovalThreshold &&
+                        opp.normalised_status === 'pipeline'
+                      const approvalStatus = approvalMap[opp.id]
+
+                      if (!needsApproval) return <td className="px-4 py-3" />
+
+                      if (approvalStatus === 'pending') return (
+                        <td className="px-4 py-3 text-center">
+                          <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+                            Pending
+                          </span>
+                        </td>
+                      )
+                      if (approvalStatus === 'approved') return (
+                        <td className="px-4 py-3 text-center">
+                          <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">
+                            Approved
+                          </span>
+                        </td>
+                      )
+                      if (approvalStatus === 'rejected') return (
+                        <td className="px-4 py-3 text-center">
+                          <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">
+                            Rejected
+                          </span>
+                        </td>
+                      )
+                      return (
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() => requestApproval(opp.id)}
+                            disabled={requestingId === opp.id}
+                            className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50 whitespace-nowrap"
+                          >
+                            {requestingId === opp.id ? '…' : 'Request Approval'}
+                          </button>
+                        </td>
+                      )
+                    })()}
                   </tr>
                 )
               })
@@ -256,7 +338,7 @@ export default function PipelineTable({ opportunities }: PipelineTableProps) {
                 <td className="px-4 py-3 text-right text-gray-600">
                   {totalRevenue > 0 ? formatPercent((totalGP / totalRevenue) * 100, 1) : '—'}
                 </td>
-                <td colSpan={2} />
+                <td colSpan={poApprovalThreshold != null ? 3 : 2} />
               </tr>
             </tfoot>
           )}

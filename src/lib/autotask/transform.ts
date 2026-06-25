@@ -131,10 +131,14 @@ export function transformOpportunity(
     ? (grossProfit / revenueTotal) * 100
     : 0
 
-  // One-time amounts — API field confirmed as onetimeRevenue / onetimeCost
+  // One-time amounts — only set if the API actually returns these fields.
+  // onetimeRevenue / setupFee are not present in all Autotask instances;
+  // falling back to opp.amount produces misleading data (87% of deals wrong).
   const raw = opp as Record<string, unknown>
-  const revenueOneTime = Number(raw.onetimeRevenue ?? raw.setupFee ?? opp.amount) || revenueTotal
-  const costOneTime    = Number(raw.onetimeCost    ?? costTotal)
+  const revenueOneTime = raw.onetimeRevenue != null ? Number(raw.onetimeRevenue)
+    : raw.setupFee     != null ? Number(raw.setupFee)
+    : null
+  const costOneTime = raw.onetimeCost != null ? Number(raw.onetimeCost) : null
 
   // ── Computed fields ───────────────────────────────────────────
   const ageDays = opp.createDate
