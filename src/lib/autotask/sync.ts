@@ -162,9 +162,31 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
       .select('id, created_at, updated_at')
 
     if (error) {
-      console.error(`[autotask/sync] Upsert failed (batch ${Math.floor(i / BATCH_SIZE) + 1}): ${error.message}`)
-      result.errors.push({ row: i, message: `Batch ${Math.floor(i / BATCH_SIZE) + 1}: ${error.message}` })
-      result.rows_skipped += batch.length
+      // A single row can collide with another record on the composite_key
+      // unique constraint (e.g. same company + title + create date under a
+      // different autotask_id) — ON CONFLICT only covers autotask_id, so
+      // Postgres rejects the whole multi-row INSERT. Retry row-by-row so one
+      // bad record can't take out the other ~499 legitimate ones with it.
+      console.warn(
+        `[autotask/sync] Batch ${Math.floor(i / BATCH_SIZE) + 1} upsert failed (${error.message}) — retrying row-by-row`
+      )
+      for (const row of batch) {
+        const { data: rowData, error: rowError } = await admin
+          .from('opportunities')
+          .upsert(row, { onConflict: 'autotask_id', ignoreDuplicates: false })
+          .select('id, created_at, updated_at')
+
+        if (rowError) {
+          console.error(`[autotask/sync] Row upsert failed (autotask_id ${row.autotask_id}): ${rowError.message}`)
+          result.errors.push({
+            row: i,
+            message: `autotask_id ${row.autotask_id} (${row.company as string} / ${row.opportunity_name as string}): ${rowError.message}`,
+          })
+          result.rows_skipped++
+          continue
+        }
+        countResults(rowData, result)
+      }
       continue
     }
 
