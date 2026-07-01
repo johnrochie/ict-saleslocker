@@ -6,11 +6,13 @@
 import { AutotaskClient, FILTER_ALL, FILTER_ACTIVE } from './client'
 import { fetchOpportunityPicklists } from './picklists'
 import { buildResourceMap, buildCompanyMap, transformOpportunity } from './transform'
+import { syncMeetings } from './meetings'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import type { AutotaskOpportunity, AutotaskCompany, AutotaskResource, SyncResult } from './types'
+import type { AutotaskOpportunity, AutotaskCompany, AutotaskResource, AutotaskContact, SyncResult } from './types'
 
-const BATCH_SIZE    = 500
-const SYNC_LOG_FILE = 'autotask-api'
+const BATCH_SIZE      = 500
+const SYNC_LOG_FILE   = 'autotask-api'
+const MEETINGS_LOG_FILE = 'autotask-meetings'
 
 async function getLastSyncTime(): Promise<string | null> {
   const admin = createAdminSupabaseClient()
@@ -193,7 +195,62 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
     countResults(data, result)
   }
 
-  // ── 9. Log and return ───────────────────────────────────────
+  // ── 9. Sync meetings (CompanyToDos + CompanyNotes) ──────────
+  // Bundled into the same cron run as Opportunities so there's a single
+  // sync trigger, but logged as its own import_logs row for visibility.
+  let meetingsResult: SyncResult['meetings']
+  try {
+    let contacts: AutotaskContact[] = []
+    try {
+      contacts = await client.queryAll<AutotaskContact>('Contacts', FILTER_ACTIVE)
+      console.log(`[autotask/sync] Fetched ${contacts.length} contacts`)
+    } catch (err) {
+      console.warn(`[autotask/sync] Contacts fetch failed (non-fatal): ${err instanceof Error ? err.message : err}`)
+    }
+    const contactMap = new Map(
+      contacts.map(c => [c.id, `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || `Contact#${c.id}`])
+    )
+    const opportunityMap = new Map(rawOpps.map(o => [o.id, o.title?.trim() ?? `Opportunity#${o.id}`]))
+
+    const mResult = await syncMeetings(client, admin, {
+      companies:     companyMap,
+      resources:     resourceMap,
+      opportunities: opportunityMap,
+      contacts:      contactMap,
+    })
+    console.log(
+      `[autotask/meetings] Done: ${mResult.rows_upserted} upserted, ${mResult.rows_skipped} skipped ` +
+      `(processed ${mResult.rows_processed})`
+    )
+    meetingsResult = mResult
+
+    await admin.from('import_logs').insert({
+      imported_by:    triggeredBy,
+      filename:       MEETINGS_LOG_FILE,
+      rows_processed: mResult.rows_processed,
+      rows_inserted:  mResult.rows_upserted,
+      rows_updated:   0,
+      rows_skipped:   mResult.rows_skipped,
+      error_count:    mResult.errors.length,
+      errors:         mResult.errors.length > 0 ? mResult.errors : null,
+      status:
+        mResult.errors.length === 0                    ? 'success'
+        : mResult.rows_upserted > 0                    ? 'partial'
+        : 'failed',
+    })
+  } catch (err) {
+    console.error(`[autotask/meetings] Sync failed: ${err instanceof Error ? err.message : err}`)
+    meetingsResult = { rows_processed: 0, rows_upserted: 0, rows_skipped: 0, errors: [{ row: 0, message: err instanceof Error ? err.message : 'Unknown error' }] }
+    await admin.from('import_logs').insert({
+      imported_by: triggeredBy,
+      filename:    MEETINGS_LOG_FILE,
+      status:      'failed',
+      error_count: 1,
+      errors:      [{ row: 0, message: err instanceof Error ? err.message : 'Unknown error' }],
+    })
+  }
+
+  // ── 10. Log and return ──────────────────────────────────────
   result.status =
     result.errors.length === 0                        ? 'success'
     : result.rows_inserted + result.rows_updated > 0  ? 'partial'
@@ -205,6 +262,7 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
     ...result,
     sync_type:   syncType,
     duration_ms: Date.now() - startMs,
+    meetings:    meetingsResult,
   }
 
   console.log(

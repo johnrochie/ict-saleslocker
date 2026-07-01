@@ -16,6 +16,8 @@ export async function GET(request: NextRequest) {
     { data: closedDeals },
     { data: closingDeals },
     { data: newEngagements },
+    { data: lastWeekMeetings },
+    { data: thisWeekMeetings },
   ] = await Promise.all([
     admin.from('opportunities')
       .select('company, opportunity_name, account_manager, opportunity_owner, revenue_total, gross_profit, gross_margin_pct, category, stage, closed_date')
@@ -32,13 +34,23 @@ export async function GET(request: NextRequest) {
       .gte('created_date', lastWeek.from + 'T00:00:00').lte('created_date', lastWeek.to + 'T23:59:59')
       .neq('normalised_status', 'portal')
       .order('created_date', { ascending: false }),
+    admin.from('meetings')
+      .select('company, opportunity, contact, assigned_to, action_type, classification, start_date, start_time, description')
+      .gte('start_date', lastWeek.from).lte('start_date', lastWeek.to)
+      .order('start_date', { ascending: true }),
+    admin.from('meetings')
+      .select('company, opportunity, contact, assigned_to, action_type, classification, start_date, start_time, description')
+      .gte('start_date', thisWeek.from).lte('start_date', thisWeek.to)
+      .order('start_date', { ascending: true }),
   ])
 
   return NextResponse.json({
     lastWeek,
     thisWeek,
-    closedDeals:    (closedDeals    || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner)),
-    closingDeals:   (closingDeals   || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner)),
-    newEngagements: (newEngagements || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner)),
+    closedDeals:      (closedDeals      || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner)),
+    closingDeals:     (closingDeals     || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner)),
+    newEngagements:   (newEngagements   || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner)),
+    lastWeekMeetings: lastWeekMeetings  || [],
+    thisWeekMeetings: thisWeekMeetings  || [],
   })
 }

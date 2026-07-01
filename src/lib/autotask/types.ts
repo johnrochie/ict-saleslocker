@@ -53,6 +53,43 @@ export interface AutotaskResource {
   [key: string]: unknown
 }
 
+// ── Raw CompanyToDo (scheduled/upcoming meeting) ──────────────
+export interface AutotaskCompanyToDo {
+  id: number
+  companyID: number
+  opportunityID: number | null
+  contactID: number | null
+  assignedToResourceID: number | null
+  actionType: number
+  startDateTime: string | null
+  endDateTime: string | null
+  activityDescription: string | null
+  [key: string]: unknown
+}
+
+// ── Raw CompanyNote (completed meeting) ───────────────────────
+export interface AutotaskCompanyNote {
+  id: number
+  companyID: number
+  opportunityID: number | null
+  contactID: number | null
+  assignedResourceID: number | null
+  actionType: number
+  startDateTime: string | null
+  endDateTime: string | null
+  note: string | null
+  [key: string]: unknown
+}
+
+// ── Raw Contact (for meeting attendee names) ──────────────────
+export interface AutotaskContact {
+  id: number
+  firstName: string
+  lastName: string
+  isActive?: boolean
+  [key: string]: unknown
+}
+
 // ── Entity field definition (for picklist resolution) ─────────
 export interface AutotaskField {
   name: string
@@ -87,4 +124,13 @@ export interface SyncResult {
   status: 'success' | 'partial' | 'failed'
   sync_type: 'full' | 'incremental'
   duration_ms: number
+  // Meetings (CompanyToDos + CompanyNotes) sync runs alongside the
+  // Opportunities sync and is logged separately — summary only, doesn't
+  // affect the opportunity counts/status above.
+  meetings?: {
+    rows_processed: number
+    rows_upserted: number
+    rows_skipped: number
+    errors: Array<{ row: number; message: string }>
+  }
 }

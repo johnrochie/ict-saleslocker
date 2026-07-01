@@ -24,14 +24,15 @@ interface Deal {
   closed_date?: string | null; projected_close_date?: string | null; created_date?: string | null
 }
 interface Meeting {
-  classification: string; company: string; action_type: string
-  start_date: string; start_time: string; description: string
-  contact: string; opportunity: string; assigned_to: string
+  classification: string | null; company: string; action_type: string | null
+  start_date: string | null; start_time: string | null; description: string | null
+  contact: string | null; opportunity: string | null; assigned_to: string | null
 }
 interface WeekData {
   lastWeek: { from: string; to: string; label: string }
   thisWeek: { from: string; to: string; label: string }
   closedDeals: Deal[]; closingDeals: Deal[]; newEngagements: Deal[]
+  lastWeekMeetings: Meeting[]; thisWeekMeetings: Meeting[]
 }
 
 const MIN_HIGHLIGHT = 5000
@@ -154,14 +155,14 @@ function MeetingList({ meetings, showRep }: { meetings: Meeting[]; showRep: bool
             {mts.map((m, i) => (
               <div key={i} className="flex items-start gap-3 text-sm py-1.5 border-b border-gray-50 last:border-0">
                 <div className="shrink-0 text-xs text-gray-400 w-28 pt-0.5">
-                  {m.start_date.slice(5).split('-').reverse().join('/')} {m.start_time && m.start_time.slice(0,5)}
+                  {m.start_date ? m.start_date.slice(5).split('-').reverse().join('/') : '—'} {m.start_time && m.start_time.slice(0,5)}
                 </div>
                 <div className="flex-1 min-w-0">
                   <span className="font-medium text-gray-800">{m.company}</span>
                   {m.contact && <span className="text-gray-500"> &mdash; {m.contact}</span>}
                   {m.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{m.description.trim()}</p>}
                 </div>
-                <span className="shrink-0 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{m.action_type}</span>
+                <span className="shrink-0 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{m.action_type ?? '—'}</span>
               </div>
             ))}
           </div>
@@ -253,7 +254,7 @@ export default function WeeklyReportClient() {
             assigned_to:    row['Assigned To Resource']    || '',
           })
         }
-        rows.sort((a, b) => a.start_date.localeCompare(b.start_date))
+        rows.sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''))
         setMeetings(rows); setCsvLoaded(true)
       },
     })
@@ -268,8 +269,14 @@ export default function WeeklyReportClient() {
   const closedDeals      = data.closedDeals.filter(filterDeal)
   const closingDeals     = data.closingDeals.filter(filterDeal)
   const newEngagements   = data.newEngagements.filter(filterDeal)
-  const lastWeekMeetings = meetings.filter(m => m.start_date >= data.lastWeek.from && m.start_date <= data.lastWeek.to && filterMeeting(m))
-  const thisWeekMeetings = meetings.filter(m => m.start_date >= data.thisWeek.from && m.start_date <= data.thisWeek.to && filterMeeting(m))
+  // Meetings sync automatically from Autotask; the CSV drop-zone is a manual
+  // override for backfill/one-off corrections, and takes priority when loaded.
+  const lastWeekMeetings = csvLoaded
+    ? meetings.filter(m => !!m.start_date && m.start_date >= data.lastWeek.from && m.start_date <= data.lastWeek.to && filterMeeting(m))
+    : data.lastWeekMeetings.filter(filterMeeting)
+  const thisWeekMeetings = csvLoaded
+    ? meetings.filter(m => !!m.start_date && m.start_date >= data.thisWeek.from && m.start_date <= data.thisWeek.to && filterMeeting(m))
+    : data.thisWeekMeetings.filter(filterMeeting)
   const showRep = selectedRep === 'all'
 
   return (
@@ -326,22 +333,22 @@ export default function WeeklyReportClient() {
         ))}
       </div>
 
-      {/* Meetings CSV */}
+      {/* Meetings sync automatically from Autotask (CompanyToDos + CompanyNotes).
+          The CSV drop-zone below is a manual override for backfill only. */}
       {!csvLoaded ? (
         <div onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if(f) readCsvFile(f) }}
-          className="border-2 border-dashed border-gray-200 rounded-xl p-5 text-center hover:border-brand-300 transition-colors">
-          <p className="text-sm font-medium text-gray-600 mb-1">Drop the To-Do &amp; Note Search CSV to load meetings</p>
-          <p className="text-xs text-gray-400 mb-3">From Autotask: Search To-Dos &amp; Notes, filter Action Type = Meeting, export CSV</p>
-          <label className="cursor-pointer text-xs font-semibold text-brand-600 border border-brand-300 rounded-lg px-3 py-1.5 hover:bg-brand-50">
+          className="border border-dashed border-gray-200 rounded-xl px-4 py-2.5 flex items-center gap-3 text-xs text-gray-400 hover:border-brand-300 transition-colors">
+          <span>Meetings sync automatically from Autotask. Drop a To-Do &amp; Note Search CSV here to override with a manual export instead.</span>
+          <label className="cursor-pointer font-semibold text-brand-600 border border-brand-300 rounded-lg px-3 py-1 hover:bg-brand-50 whitespace-nowrap">
             Browse file
             <input type="file" accept=".csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if(f) readCsvFile(f) }} />
           </label>
         </div>
       ) : (
-        <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-lg px-4 py-2.5 text-sm">
-          <span className="text-green-700 font-medium">Meetings loaded</span>
-          <span className="text-green-600">{meetings.length} total ({lastWeekMeetings.length} last week, {thisWeekMeetings.length} this week)</span>
-          <button onClick={() => { setMeetings([]); setCsvLoaded(false) }} className="ml-auto text-xs text-gray-400 hover:text-gray-600">Clear</button>
+        <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm">
+          <span className="text-amber-700 font-medium">Manual CSV override active</span>
+          <span className="text-amber-600">{meetings.length} total ({lastWeekMeetings.length} last week, {thisWeekMeetings.length} this week)</span>
+          <button onClick={() => { setMeetings([]); setCsvLoaded(false) }} className="ml-auto text-xs text-gray-400 hover:text-gray-600">Clear (use synced data)</button>
         </div>
       )}
 
@@ -356,11 +363,11 @@ export default function WeeklyReportClient() {
       </Section>
 
       <Section title={'Customer Meetings Held - ' + data.lastWeek.label} count={lastWeekMeetings.length} color="purple">
-        {!csvLoaded ? <p className="text-sm text-gray-400 italic">Load the meetings CSV above to see this section.</p> : <MeetingList meetings={lastWeekMeetings} showRep={showRep} />}
+        <MeetingList meetings={lastWeekMeetings} showRep={showRep} />
       </Section>
 
       <Section title={'Meetings Planned - ' + data.thisWeek.label} count={thisWeekMeetings.length} color="purple">
-        {!csvLoaded ? <p className="text-sm text-gray-400 italic">Load the meetings CSV above to see this section.</p> : <MeetingList meetings={thisWeekMeetings} showRep={showRep} />}
+        <MeetingList meetings={thisWeekMeetings} showRep={showRep} />
       </Section>
 
       <Section title={'New Engagements - ' + data.lastWeek.label} count={newEngagements.length} color="gray">

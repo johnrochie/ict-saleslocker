@@ -156,6 +156,13 @@ The sync infrastructure is already scaffolded (probe/status/sync routes, client,
 
 This is the most important infrastructure change. Everything downstream gets more reliable.
 
+**Known fixed (July 2026):** a `composite_key` unique-constraint collision was silently failing whole 500-row upsert batches, dropping ~200-260 legitimate opportunities per sync (including recently closed deals) since 6/22. Fixed by retrying failed batches row-by-row so only the actual colliding record is skipped and logged — see [sync.ts](src/lib/autotask/sync.ts).
+
+**Deferred — incremental sync (revisit post-Phase 2):** the sync currently does a full fetch + full upsert of every opportunity (~7,300 records, ~80s) on every run, because an earlier incremental-sync attempt filtered on the wrong field name (`lastActivityDate`, which doesn't exist) and was assumed impossible for this entity. Context7 confirms Autotask's actual field is `lastActivity`, and Autotask's own best-practice guidance is to filter on it for incremental polling. Opportunities does not support webhooks, so polling is the only option — but it can be a smart poll instead of a full one. Planned approach:
+- Daily: filter `lastActivity >= lastSyncTimestamp`, upsert only changed records.
+- Weekly (or monthly): full resync as a safety net against clock skew, missed edge cases, or deletions.
+- Lower priority than Phase 2 — current full-sync approach works, just inefficient. Revisit once Phase 2 is live.
+
 ### 4b — Kaseya Quote Manager Integration
 
 Link quotes to opportunities. When a quote is issued in Kaseya, it attaches to the matching opportunity in SalesIQ. This surfaces:
