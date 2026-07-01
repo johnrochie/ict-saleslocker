@@ -92,3 +92,30 @@ export function weekBounds(weekOffset: number): {
     meetingDate: mon.toLocaleDateString('en-IE', { weekday: 'long', day: '2-digit', month: 'short' }),
   }
 }
+
+// ── Month utilities ───────────────────────────────────────
+
+export interface MonthBounds {
+  from: string      // YYYY-MM-DD
+  to: string        // YYYY-MM-DD
+  label: string     // e.g. "July 2026"
+  monthKey: string  // YYYY-MM
+}
+
+/** monthKey is "YYYY-MM"; defaults to the current month if omitted.
+ *  Builds from/to as plain date strings (no toISOString/UTC conversion) —
+ *  see weekBounds() for why that matters during Irish Summer Time. */
+export function monthBounds(monthKey?: string): MonthBounds {
+  const now = new Date()
+  const [year, month] = monthKey
+    ? monthKey.split('-').map(Number)
+    : [now.getFullYear(), now.getMonth() + 1]
+  const daysInMonth = new Date(year, month, 0).getDate()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return {
+    from:     `${year}-${pad(month)}-01`,
+    to:       `${year}-${pad(month)}-${pad(daysInMonth)}`,
+    label:    new Date(year, month - 1, 1).toLocaleDateString('en-IE', { month: 'long', year: 'numeric' }),
+    monthKey: `${year}-${pad(month)}`,
+  }
+}

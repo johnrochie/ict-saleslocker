@@ -15,6 +15,21 @@ function dealMatchesRep(deal: { account_manager: string | null; opportunity_owne
   if (rep === 'all') return true
   return (deal.account_manager || '') === rep || (deal.opportunity_owner || '') === rep
 }
+function mondayOf(date: Date): Date {
+  const dow = date.getDay()
+  const toMon = dow === 0 ? -6 : 1 - dow
+  const mon = new Date(date)
+  mon.setDate(date.getDate() + toMon)
+  mon.setHours(0, 0, 0, 0)
+  return mon
+}
+/** Number of whole weeks (Mon-start) between today's week and the week containing `dateStr`. */
+function weekOffsetForDate(dateStr: string): number {
+  const chosen = new Date(dateStr + 'T00:00:00')
+  if (isNaN(chosen.getTime())) return 0
+  const diffMs = mondayOf(chosen).getTime() - mondayOf(new Date()).getTime()
+  return Math.round(diffMs / (7 * 86_400_000))
+}
 
 interface Deal {
   company: string; opportunity_name: string
@@ -215,6 +230,11 @@ export default function WeeklyReportClient() {
     setWeekOffset(o => o + 1)
     setMeetings([]); setCsvLoaded(false)
   }
+  function goToDate(dateStr: string) {
+    if (!dateStr) return
+    setWeekOffset(Math.min(weekOffsetForDate(dateStr), 0))
+    setMeetings([]); setCsvLoaded(false)
+  }
 
   function handleDragStart(i: number) { setDragIdx(i) }
   function handleDragOver(e: React.DragEvent, i: number) {
@@ -290,6 +310,9 @@ export default function WeeklyReportClient() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <input type="date" onChange={e => goToDate(e.target.value)} max={new Date().toISOString().slice(0, 10)}
+            title="Jump to a week"
+            className="text-xs text-gray-600 border border-gray-200 rounded-lg px-2.5 py-1.5 hover:border-gray-300" />
           {weekOffset < 0 && (
             <button onClick={() => { setWeekOffset(0); setMeetings([]); setCsvLoaded(false) }}
               className="text-xs text-brand-600 border border-brand-300 rounded-lg px-3 py-1.5 hover:bg-brand-50">

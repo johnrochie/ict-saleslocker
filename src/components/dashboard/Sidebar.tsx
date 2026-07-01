@@ -63,6 +63,12 @@ const navItems: NavItem[] = [
   },
 ]
 
+const amNavItem: NavItem = {
+  label: 'AM Meetings', href: '/dashboard/account-management',
+  allowedRoles: ['admin', 'sales_manager'],
+  icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 100-8 4 4 0 000 8zm6 0a4 4 0 10-4-4" /></svg>,
+}
+
 export default function Sidebar({ userEmail, userName, userRole }: { userEmail: string; userName: string; userRole: string }) {
   const pathname = usePathname()
   const router   = useRouter()
@@ -128,6 +134,28 @@ export default function Sidebar({ userEmail, userName, userRole }: { userEmail: 
             </Link>
           )
         })}
+
+        {(!amNavItem.allowedRoles || amNavItem.allowedRoles.includes(userRole)) && (
+          <>
+            {/* Divider */}
+            <div className="px-3 pt-3 pb-1">
+              <div className="border-t border-gray-100 pt-3">
+                <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Account Management</span>
+              </div>
+            </div>
+            {(() => {
+              const isActive = pathname.startsWith(amNavItem.href)
+              return (
+                <Link href={amNavItem.href}
+                  className={cn('flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                    isActive ? 'bg-brand-50 text-brand-600' : 'text-gray-600 hover:bg-gray-50 hover:text-navy-700')}>
+                  <span className={isActive ? 'text-brand-500' : 'text-gray-400'}>{amNavItem.icon}</span>
+                  {amNavItem.label}
+                </Link>
+              )
+            })()}
+          </>
+        )}
       </nav>
 
       <div className="px-3 py-4 border-t border-gray-100">
