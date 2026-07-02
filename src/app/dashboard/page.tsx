@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/supabase/pagination'
 import MetricCard from '@/components/dashboard/MetricCard'
 import CategoryBreakdown from '@/components/dashboard/CategoryBreakdown'
 import OwnerBreakdown from '@/components/dashboard/OwnerBreakdown'
@@ -12,12 +13,17 @@ export const revalidate = 0
 export default async function DashboardPage() {
   const supabase = await createClient()
 
-  const { data: opps } = await supabase
+  // .select('*') alone silently caps at 1000 rows (Supabase/PostgREST default)
+  // and this table has 2500+ non-portal rows — paginate to get everything.
+  const opps = await fetchAllRows(supabase, (client, from, to) => client
     .from('opportunities')
     .select('*')
     .neq('normalised_status', 'portal')
+    .order('id', { ascending: true })
+    .range(from, to)
+  )
 
-  const rows = opps ?? []
+  const rows = opps
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 

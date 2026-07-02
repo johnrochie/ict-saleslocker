@@ -134,8 +134,12 @@ export async function syncMeetings(
   const records: Record<string, unknown>[] = []
 
   if (todoActionIds.length > 0) {
+    // Exclude completed To-Dos — per Autotask's own docs, a completed To-Do
+    // is also queryable as a CompanyNote (its "completed" twin), so fetching
+    // both here would double-count every meeting that's already taken place.
     const todos = await client.queryAll<AutotaskCompanyToDo>('CompanyToDos', [
       { op: 'in', field: 'actionType', value: todoActionIds },
+      { op: 'notExist', field: 'completedDate' },
     ])
     console.log(`[autotask/meetings] Fetched ${todos.length} CompanyToDos (meetings)`)
     todos.forEach(t => records.push(transformToDo(t, todoActionLabels, maps)))

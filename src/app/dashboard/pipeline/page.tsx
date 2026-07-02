@@ -1,4 +1,5 @@
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/supabase/pagination'
 import PipelineTable from '@/components/dashboard/PipelineTable'
 
 export const revalidate = 0
@@ -9,12 +10,13 @@ export default async function PipelinePage() {
 
   const admin = createAdminSupabaseClient()
 
-  const [oppsResult, settingResult, approvalsResult] = await Promise.all([
-    supabase
+  const [opps, settingResult, approvalsResult] = await Promise.all([
+    fetchAllRows(supabase, (client, from, to) => client
       .from('opportunities')
       .select('*')
       .in('normalised_status', ['pipeline', 'on_hold', 'on_hold_stale'])
-      .order('revenue_total', { ascending: false }),
+      .order('revenue_total', { ascending: false }).order('id', { ascending: true })
+      .range(from, to)),
 
     admin
       .from('system_settings')
@@ -46,7 +48,7 @@ export default async function PipelinePage() {
         <p className="text-sm text-gray-500 mt-0.5">Active, On Hold, and Stale opportunities</p>
       </div>
       <PipelineTable
-        opportunities={oppsResult.data ?? []}
+        opportunities={opps}
         poApprovalThreshold={threshold}
         existingApprovals={existingApprovals}
       />

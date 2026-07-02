@@ -1,5 +1,6 @@
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { createClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/supabase/pagination'
 import { redirect } from 'next/navigation'
 import LeadershipClient from '@/app/dashboard/leadership/LeadershipClient'
 
@@ -51,24 +52,25 @@ export default async function RetailLeadershipPage() {
   const { data: profile } = await admin.from('profiles').select('role').eq('id', user.id).single()
   if (!['admin', 'sales_manager'].includes(profile?.role || '')) redirect('/dashboard')
 
-  const [
-    { data: wonOpps },
-    { data: pipeOpps },
-  ] = await Promise.all([
-    admin.from('opportunities')
+  const [wonOpps, pipeOpps] = await Promise.all([
+    fetchAllRows(admin, (client, from, to) => client
+      .from('opportunities')
       .select('*')
       .in('account_manager', RETAIL_REPS)
       .in('status', ['Closed', 'Implemented'])
-      .order('closed_date', { ascending: false }),
-    admin.from('opportunities')
+      .order('closed_date', { ascending: false }).order('id', { ascending: true })
+      .range(from, to)),
+    fetchAllRows(admin, (client, from, to) => client
+      .from('opportunities')
       .select('*')
       .in('account_manager', RETAIL_REPS)
       .eq('status', 'Active')
-      .order('revenue_total', { ascending: false }),
+      .order('revenue_total', { ascending: false }).order('id', { ascending: true })
+      .range(from, to)),
   ])
 
-  const winsData = (wonOpps || []).map(mapOpp)
-  const pipeData = (pipeOpps || []).map(mapOpp)
+  const winsData = wonOpps.map(mapOpp)
+  const pipeData = pipeOpps.map(mapOpp)
 
   return (
     <LeadershipClient

@@ -59,11 +59,12 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 ]
 
 export default function JohnDashboard({
-  wins, pipeline, all,
+  wins, pipeline, all, year,
 }: {
   wins: Opportunity[]
   pipeline: Opportunity[]
   all: Opportunity[]
+  year: number
 }) {
   const [tab, setTab] = useState<Tab>('sales')
 
@@ -100,7 +101,7 @@ export default function JohnDashboard({
           <p className="text-sm text-gray-500 mt-0.5">John Roche · Personal view across Sales, Team, Ops, Financial &amp; Marketing</p>
         </div>
         <div className="text-xs text-gray-400 bg-gray-100 px-3 py-1.5 rounded-full">
-          {all.length} records loaded
+          {year} · {all.length} records
         </div>
       </div>
 
@@ -313,7 +314,7 @@ export default function JohnDashboard({
       {tab === 'ops' && (
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <StatCard label="Total Opportunities" value={String(all.length)}       sub="all time"                  colour="border-blue-500"   />
+            <StatCard label="Total Opportunities" value={String(all.length)}       sub={`${year} + open pipeline`} colour="border-blue-500"   />
             <StatCard label="Active Pipeline"     value={String(pipeline.length)}  sub="pipeline + on hold"        colour="border-teal-500"   />
             <StatCard label="Overdue"             value={String(metrics.overdue)}  sub="past projected close date" colour="border-red-400"    />
             <StatCard label="Negative Margin"     value={String(metrics.negMargin)} sub="require pricing review"   colour="border-amber-500"  />

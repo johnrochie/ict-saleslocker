@@ -1,4 +1,5 @@
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/supabase/pagination'
 import LeadershipClient from './LeadershipClient'
 
 export const revalidate = 0
@@ -44,24 +45,30 @@ export default async function LeadershipPage() {
   const admin    = createAdminSupabaseClient()
   const year     = new Date().getFullYear()
 
+  // wonOpps unbounded exceeds the Supabase/PostgREST 1000-row default cap
+  // (1650+ won deals all-time) — paginate to avoid silently dropping the rest.
   const [
-    { data: wonOpps },
-    { data: pipeOpps },
+    wonOpps,
+    pipeOpps,
     { data: categoryTargetsRaw },
   ] = await Promise.all([
-    supabase.from('opportunities').select('*').eq('normalised_status', 'won')
-      .order('closed_date', { ascending: false }),
-    supabase.from('opportunities').select('*')
+    fetchAllRows(supabase, (client, from, to) => client
+      .from('opportunities').select('*').eq('normalised_status', 'won')
+      .order('closed_date', { ascending: false }).order('id', { ascending: true })
+      .range(from, to)),
+    fetchAllRows(supabase, (client, from, to) => client
+      .from('opportunities').select('*')
       .in('normalised_status', ['pipeline', 'on_hold', 'on_hold_stale'])
-      .order('revenue_total', { ascending: false }),
+      .order('revenue_total', { ascending: false }).order('id', { ascending: true })
+      .range(from, to)),
     admin.from('category_revenue_targets')
       .select('category_name, gl_code, annual_revenue_target, is_framework, sort_order')
       .eq('year', year)
       .order('sort_order'),
   ])
 
-  const winsData       = (wonOpps || []).map(mapOpp)
-  const pipeData       = (pipeOpps || []).map(mapOpp)
+  const winsData       = wonOpps.map(mapOpp)
+  const pipeData       = pipeOpps.map(mapOpp)
   const categoryTargets = (categoryTargetsRaw || []).map(ct => ({
     category_name:         ct.category_name as string,
     gl_code:               ct.gl_code as string | null,
