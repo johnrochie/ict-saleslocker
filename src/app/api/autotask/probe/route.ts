@@ -20,7 +20,20 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Admin only' }, { status: 403 })
   }
 
-  const entity = new URL(request.url).searchParams.get('entity') ?? 'SalesActivities'
+  const url    = new URL(request.url)
+  const entity = url.searchParams.get('entity') ?? 'SalesActivities'
+
+  // Optional: ?filter=[{"op":"exist","field":"opportunityID"}] to target
+  // specific records instead of the lowest-ID (usually oldest) rows.
+  const filterParam = url.searchParams.get('filter')
+  let filter: unknown[] = [{ op: 'gte', field: 'id', value: 1 }]
+  if (filterParam) {
+    try {
+      filter = JSON.parse(filterParam)
+    } catch {
+      return NextResponse.json({ error: 'filter param must be valid JSON' }, { status: 400 })
+    }
+  }
 
   if (!AutotaskClient.isConfigured()) {
     return NextResponse.json({ error: 'Autotask not configured' }, { status: 503 })
@@ -39,7 +52,7 @@ export async function GET(request: NextRequest) {
         'Secret':             process.env.AUTOTASK_SECRET!,
         'ApiIntegrationCode': process.env.AUTOTASK_INTEGRATION_CODE ?? '',
       },
-      body: JSON.stringify({ filter: [{ op: 'gte', field: 'id', value: 1 }] }),
+      body: JSON.stringify({ filter }),
     })
     const sample = res.ok
       ? await res.json()
@@ -47,10 +60,11 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       entity,
+      filterUsed:    filter,
       fieldCount:    fields.length,
       fields:        fields.map(f => ({ name: f.name, dataType: f.dataType, isPickList: f.isPickList })),
       sampleCount:   sample?.items?.length ?? 0,
-      sampleRecords: sample?.items?.slice(0, 3) ?? sample,
+      sampleRecords: sample?.items?.slice(0, 5) ?? sample,
     })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
