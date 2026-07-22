@@ -207,19 +207,21 @@ function buildCustomerConc(winCats,pipeCats){
 function buildForecast(){
   if(!pipeData||!pipeData.length) return '';
   const today = new Date(); today.setHours(0,0,0,0);
+  const in4Weeks = new Date(today.getTime() + 28*86400000);
 
-  // Quarter label helper
+  // Helpers
   function quarterOf(d){ const m=d.getMonth(); const q=Math.floor(m/3)+1; return `Q${q} ${d.getFullYear()}`; }
   function monthKey(d){ return d.getFullYear()*100+(d.getMonth()+1); }
   function monthLabel(d){ return d.toLocaleDateString('en-IE',{month:'long',year:'numeric'}); }
   function quarterKey(d){ const q=Math.floor(d.getMonth()/3)+1; return d.getFullYear()*10+q; }
 
-  // Bucket deals
-  const overdue=[], noDate=[], byQtr={};
+  // Bucket deals into: overdue | closingSoon (0-28d) | longer (>28d) | noDate
+  const overdue=[], closingSoon=[], noDate=[], byQtr={};
   pipeData.forEach(d=>{
     const cd=parseDate(d['Projected Close Date']);
     if(!cd){ noDate.push(d); return; }
     if(cd<today){ overdue.push(d); return; }
+    if(cd<=in4Weeks){ closingSoon.push(d); return; }
     const qk=quarterKey(cd), mk=monthKey(cd);
     if(!byQtr[qk]) byQtr[qk]={ label:quarterOf(cd), months:{}, total:0, count:0 };
     if(!byQtr[qk].months[mk]) byQtr[qk].months[mk]={ label:monthLabel(cd), deals:[], total:0, count:0 };
@@ -231,25 +233,27 @@ function buildForecast(){
     byQtr[qk].count++;
   });
 
-  function dealRow(d){
+  function dealRow(d, showDate){
     const rev=parseEuro(d['Revenue (Total)']);
     const rep=d['Account Manager']||d['Opportunity Owner']||'—';
     const repShort=rep.includes(',')?rep.split(',').map(s=>s.trim()).reverse().join(' '):rep;
     const sn=stageNum(d.Stage);
     const stageCls=sn<=2?'stage-badge stage-lo':sn===3?'stage-badge stage-mid':'stage-badge stage-hi';
+    const dateCol=showDate?`<td class="r" style="font-size:.72rem;color:var(--muted)">${fmtDate(d['Projected Close Date'])}</td>`:'';
     return `<tr>
       <td class="fc-co">${d.Company||'—'}</td>
       <td class="fc-opp"><div class="deal-opp-name" title="${d.Opportunity||''}">${d.Opportunity||'—'}</div></td>
       <td class="fc-rep">${repShort}</td>
       <td><span class="${stageCls}">${shortStage(d.Stage)}</span></td>
+      ${dateCol}
       <td class="r fc-val">${fmtE(rev)}</td>
     </tr>`;
   }
 
-  function monthBlock(mk,mo,qk,idx){
+  function monthBlock(mk,mo,qk){
     const id=`fc-m-${qk}-${mk}`;
     const rows=mo.deals.sort((a,b)=>parseEuro(b['Revenue (Total)'])-parseEuro(a['Revenue (Total)']))
-      .map(dealRow).join('');
+      .map(d=>dealRow(d,false)).join('');
     return `<div class="fc-month">
       <div class="fc-month-hdr" onclick="toggle('${id}-b','${id}-a')">
         <span class="fc-month-name">${mo.label}</span>
@@ -269,7 +273,7 @@ function buildForecast(){
   function quarterBlock(qk,qtr){
     const id=`fc-q-${qk}`;
     const sortedMonths=Object.entries(qtr.months).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
-    const monthBlocks=sortedMonths.map(([mk,mo],i)=>monthBlock(mk,mo,qk,i)).join('');
+    const monthBlocks=sortedMonths.map(([mk,mo])=>monthBlock(mk,mo,qk)).join('');
     return `<div class="fc-qtr">
       <div class="fc-qtr-hdr" onclick="toggle('${id}-b','${id}-a')">
         <span class="fc-qtr-label">${qtr.label}</span>
@@ -281,52 +285,70 @@ function buildForecast(){
     </div>`;
   }
 
-  // Overdue block
-  let overdueHtml='';
-  if(overdue.length){
-    const overdueTotal=overdue.reduce((s,d)=>s+parseEuro(d['Revenue (Total)']),0);
-    const overdueRows=overdue.sort((a,b)=>{
-      const da=parseDate(a['Projected Close Date']), db=parseDate(b['Projected Close Date']);
-      return da&&db?da-db:0;
-    }).map(d=>{
+  // ── Section 1: Closing in the Next 4 Weeks ──────────────────
+  const urgentDeals=[...overdue,...closingSoon].sort((a,b)=>{
+    const da=parseDate(a['Projected Close Date']), db=parseDate(b['Projected Close Date']);
+    if(!da&&!db) return 0; if(!da) return 1; if(!db) return -1;
+    return da-db;
+  });
+  const urgentTotal=urgentDeals.reduce((s,d)=>s+parseEuro(d['Revenue (Total)']),0);
+
+  let urgentHtml='<div class="empty-state">No deals overdue or closing in the next 4 weeks</div>';
+  if(urgentDeals.length){
+    const urgentRows=urgentDeals.map(d=>{
       const rev=parseEuro(d['Revenue (Total)']);
       const rep=d['Account Manager']||d['Opportunity Owner']||'—';
       const repShort=rep.includes(',')?rep.split(',').map(s=>s.trim()).reverse().join(' '):rep;
-      const daysOver=Math.floor((today-parseDate(d['Projected Close Date']))/(86400000));
-      return `<tr class="overdue">
+      const cd=parseDate(d['Projected Close Date']);
+      const isOD=cd&&cd<today;
+      const daysOver=isOD?Math.floor((today-cd)/(86400000)):null;
+      const daysLeft=!isOD&&cd?Math.ceil((cd-today)/(86400000)):null;
+      const urgencyBadge=isOD
+        ?`<span class="overdue-badge">${daysOver}d overdue</span>`
+        :`<span style="background:#fef3c7;color:#92400e;font-size:.6rem;font-weight:700;padding:1px 5px;border-radius:6px;margin-left:4px;">${daysLeft}d left</span>`;
+      return `<tr${isOD?' class="overdue"':''}>
         <td class="fc-co">${d.Company||'—'}</td>
-        <td class="fc-opp"><div class="deal-opp-name">${d.Opportunity||'—'}<span class="overdue-badge">${daysOver}d overdue</span></div></td>
+        <td class="fc-opp"><div class="deal-opp-name">${d.Opportunity||'—'}${urgencyBadge}</div></td>
         <td class="fc-rep">${repShort}</td>
         <td><span class="stage-badge">${shortStage(d.Stage)}</span></td>
+        <td class="r" style="font-size:.72rem;${isOD?'color:var(--risk);font-weight:700':''}">${fmtDate(d['Projected Close Date'])}</td>
         <td class="r fc-val">${fmtE(rev)}</td>
       </tr>`;
     }).join('');
-    overdueHtml=`<div class="fc-overdue">
-      <div class="fc-overdue-hdr" onclick="toggle('fc-od-b','fc-od-a')">
-        <span class="fc-od-icon">⚠️</span>
-        <span class="fc-qtr-label" style="color:var(--risk)">Overdue</span>
-        <span class="fc-qtr-meta">${overdue.length} deal${overdue.length!==1?'s':''} past projected close</span>
-        <span class="fc-qtr-val" style="color:var(--risk)">${fmtE(overdue.reduce((s,d)=>s+parseEuro(d['Revenue (Total)']),0))}</span>
-        <span class="acc-arrow" id="fc-od-a">▼</span>
-      </div>
-      <div class="acc-body open" id="fc-od-b">
-        <table class="deal-table fc-table">
-          <thead><tr><th>Company</th><th>Opportunity</th><th>Rep</th><th>Stage</th><th class="r">Value</th></tr></thead>
-          <tbody>${overdueRows}</tbody>
-        </table>
-      </div>
-    </div>`;
+    urgentHtml=`<div style="overflow-x:auto"><table class="deal-table fc-table" style="font-size:.78rem">
+      <thead><tr><th>Company</th><th>Opportunity</th><th>Rep</th><th>Stage</th><th class="r">Close Date</th><th class="r">Value</th></tr></thead>
+      <tbody>${urgentRows}</tbody>
+    </table></div>`;
   }
 
-  // Quarter blocks sorted chronologically
+  const overdueCount=overdue.length, soonCount=closingSoon.length;
+  const urgentMeta=[
+    overdueCount?`<span style="color:var(--risk);font-weight:600">${overdueCount} overdue</span>`:'',
+    soonCount?`<span style="color:var(--amber);font-weight:600">${soonCount} closing within 4 weeks</span>`:''
+  ].filter(Boolean).join(' &nbsp;·&nbsp; ')||'All clear';
+
+  const section1=`<div class="section" style="border-color:#fca5a5">
+    <div class="section-hdr" style="background:#fff5f5">
+      <div class="section-hdr-left">
+        <span class="section-icon">🔥</span>
+        <div>
+          <div class="section-title" style="color:var(--risk)">Closing in the Next 4 Weeks</div>
+          <div class="section-meta">${urgentMeta}</div>
+        </div>
+      </div>
+      <div class="section-total" style="color:var(--risk)">${urgentDeals.length?fmtE(urgentTotal):'—'}</div>
+    </div>
+    <div style="padding:0">${urgentHtml}</div>
+  </div>`;
+
+  // ── Section 2: Pipeline Forecast (beyond 4 weeks) ────────────
   const sortedQtrs=Object.entries(byQtr).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
   const qtrBlocks=sortedQtrs.map(([qk,qtr])=>quarterBlock(qk,qtr)).join('');
-  const grandTotal=pipeData.reduce((s,d)=>s+parseEuro(d['Revenue (Total)']),0);
+  const longerTotal=Object.values(byQtr).reduce((s,q)=>s+q.total,0);
 
-  // No date block
   let noDateHtml='';
   if(noDate.length){
-    const noDateRows=noDate.map(dealRow).join('');
+    const noDateRows=noDate.sort((a,b)=>parseEuro(b['Revenue (Total)'])-parseEuro(a['Revenue (Total)'])).map(d=>dealRow(d,false)).join('');
     noDateHtml=`<div class="fc-month" style="opacity:.7">
       <div class="fc-month-hdr" onclick="toggle('fc-nd-b','fc-nd-a')">
         <span class="fc-month-name" style="color:var(--muted)">No close date</span>
@@ -343,23 +365,27 @@ function buildForecast(){
     </div>`;
   }
 
-  return `<div class="section">
+  const longerMeta=sortedQtrs.length?`${sortedQtrs.length} quarter${sortedQtrs.length!==1?'s':''}${noDate.length?' · '+noDate.length+' with no close date':''}`:noDate.length?noDate.length+' deals with no close date':'No deals beyond 4 weeks';
+
+  const section2=`<div class="section">
     <div class="section-hdr">
       <div class="section-hdr-left">
         <span class="section-icon">📅</span>
         <div>
           <div class="section-title">Pipeline Forecast</div>
-          <div class="section-meta">${pipeData.length} active deals &nbsp;·&nbsp; ${sortedQtrs.length} quarter${sortedQtrs.length!==1?'s':''}</div>
+          <div class="section-meta">${longerMeta}</div>
         </div>
       </div>
-      <div class="section-total pipe-text">${fmtE(grandTotal)}</div>
+      <div class="section-total pipe-text">${longerTotal||noDate.length?fmtE(longerTotal+noDate.reduce((s,d)=>s+parseEuro(d['Revenue (Total)']),0)):'—'}</div>
     </div>
     <div class="fc-body">
-      ${overdueHtml}
-      ${qtrBlocks}
+      ${qtrBlocks||''}
       ${noDateHtml}
+      ${!qtrBlocks&&!noDateHtml?'<div class="empty-state">No deals beyond 4 weeks</div>':''}
     </div>
   </div>`;
+
+  return section1 + section2;
 }
 
 function buildKeyDeals(){
