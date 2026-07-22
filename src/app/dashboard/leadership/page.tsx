@@ -58,7 +58,7 @@ export default async function LeadershipPage() {
       .range(from, to)),
     fetchAllRows(supabase, (client, from, to) => client
       .from('opportunities').select('*')
-      .in('normalised_status', ['pipeline', 'on_hold', 'on_hold_stale'])
+      .eq('normalised_status', 'pipeline')
       .order('revenue_total', { ascending: false }).order('id', { ascending: true })
       .range(from, to)),
     admin.from('category_revenue_targets')

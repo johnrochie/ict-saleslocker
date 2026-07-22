@@ -26,11 +26,11 @@ export default async function JohnPage() {
     .range(from, to)
   )
 
-  // Pipeline — open deals always shown regardless of age
+  // Pipeline — active + on_hold (Not Ready To Buy) deals; excludes Quarantine/on_hold_stale
   const pipeline = await fetchAllRows(supabase, (client, from, to) => client
     .from('opportunities')
     .select('*')
-    .in('normalised_status', ['pipeline', 'on_hold', 'on_hold_stale'])
+    .in('normalised_status', ['pipeline', 'on_hold'])
     .order('revenue_total', { ascending: false }).order('id', { ascending: true })
     .range(from, to)
   )
@@ -42,7 +42,7 @@ export default async function JohnPage() {
     .from('opportunities')
     .select('*')
     .or(
-      `normalised_status.in.(pipeline,on_hold,on_hold_stale),` +
+      `normalised_status.in.(pipeline,on_hold),` +
       `and(created_date.gte.${yearFrom}T00:00:00,created_date.lte.${yearTo}T23:59:59),` +
       `and(closed_date.gte.${yearFrom},closed_date.lte.${yearTo})`
     )

@@ -118,11 +118,14 @@ function normaliseStatus(row: AutotaskCsvRow): NormalisedStatus {
   // On Hold — stale (Quarantine stage = 90+ days no update)
   if (stage === 'Quarantine') return 'on_hold_stale'
 
+  // Inactive / dead statuses
+  if (status === 'Not Active' || status === 'Inactive' || status === 'Dead') return 'on_hold_stale'
+
   // Active = Pipeline
   if (status === 'Active') return 'pipeline'
 
-  // Default fallback
-  return 'pipeline'
+  // Unknown status — treat as inactive rather than polluting pipeline
+  return 'on_hold_stale'
 }
 
 // ── Overdue check ────────────────────────────────────────────

@@ -62,9 +62,11 @@ export function normaliseStatusFromStrings(args: {
   if (statusLabel === 'Lost')              return 'lost'
   if (statusLabel === 'Not Ready To Buy')  return 'on_hold'
   if (stageLabel  === 'Quarantine')        return 'on_hold_stale'
+  if (statusLabel === 'Not Active' || statusLabel === 'Inactive' || statusLabel === 'Dead') return 'on_hold_stale'
   if (statusLabel === 'Active')            return 'pipeline'
 
-  return 'pipeline'
+  // Unknown status — treat as inactive rather than polluting pipeline
+  return 'on_hold_stale'
 }
 
 // ── Composite key — same format as CSV parser ────────────────

@@ -6,19 +6,55 @@ import OwnerBreakdown from '@/components/dashboard/OwnerBreakdown'
 import CustomerBreakdown from '@/components/dashboard/CustomerBreakdown'
 import RiskPanel from '@/components/dashboard/RiskPanel'
 import StaleActivityPanel from '@/components/dashboard/StaleActivityPanel'
+import YearFilter from '@/components/dashboard/YearFilter'
 import { formatCompact, formatPercent } from '@/lib/utils/formatting'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 export const revalidate = 0
 
-export default async function DashboardPage() {
-  const supabase = await createClient()
+// Years available in the dropdown: earliest record's year through the
+// current year. Cheap single-row lookup, not a full table scan.
+async function availableYears(supabase: SupabaseClient): Promise<number[]> {
+  const currentYear = new Date().getFullYear()
+  const { data } = await supabase
+    .from('opportunities')
+    .select('created_date')
+    .order('created_date', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  const earliestYear = data?.created_date ? new Date(data.created_date).getFullYear() : currentYear
+  const years: number[] = []
+  for (let y = currentYear; y >= earliestYear; y--) years.push(y)
+  return years
+}
 
-  // .select('*') alone silently caps at 1000 rows (Supabase/PostgREST default)
-  // and this table has 2500+ non-portal rows — paginate to get everything.
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ year?: string }>
+}) {
+  const supabase = await createClient()
+  const { year: yearParam } = await searchParams
+  const currentYear = new Date().getFullYear()
+  const selectedYear = yearParam ? parseInt(yearParam, 10) : currentYear
+  const yearFrom = `${selectedYear}-01-01`
+  const yearTo   = `${selectedYear}-12-31`
+
+  const years = await availableYears(supabase)
+
+  // .select('*') alone silently caps at 1000 rows (Supabase/PostgREST default).
+  // Open pipeline/on-hold deals show regardless of age (still live); won/lost
+  // are scoped to the selected year. Lost deals have no reliable close date
+  // in Autotask, so created_date is the best proxy there.
   const opps = await fetchAllRows(supabase, (client, from, to) => client
     .from('opportunities')
     .select('*')
     .neq('normalised_status', 'portal')
+    .or(
+      `normalised_status.in.(pipeline,on_hold,on_hold_stale),` +
+      `and(created_date.gte.${yearFrom}T00:00:00,created_date.lte.${yearTo}T23:59:59),` +
+      `and(closed_date.gte.${yearFrom},closed_date.lte.${yearTo})`
+    )
     .order('id', { ascending: true })
     .range(from, to)
   )
@@ -136,11 +172,15 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-6">
 
-      <div>
-        <h1 className="text-xl font-semibold text-gray-900">Overview</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          {new Date().toLocaleDateString('en-IE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-        </p>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">Overview</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {new Date().toLocaleDateString('en-IE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            {' · '}{selectedYear} data + open pipeline
+          </p>
+        </div>
+        <YearFilter years={years} selected={selectedYear} />
       </div>
 
       {/* Key Metrics */}
