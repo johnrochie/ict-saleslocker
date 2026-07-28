@@ -64,19 +64,19 @@ async function runSync(triggeredBy: string) {
     )
   }
 
-  // Mark any previous successful sync logs as superseded so getLastSyncTime()
-  // returns null and the sync always runs a full scan (companyID >= 1).
-  // This is required because the Autotask Opportunities entity has no
-  // lastModifiedDate field — incremental filters cause a 500 error.
-  const admin = createAdminSupabaseClient()
-  await admin
-    .from('import_logs')
-    .update({ status: 'superseded' })
-    .eq('filename', 'autotask-api')
-    .eq('status', 'success')
-  console.log('[api/autotask/sync] Cleared previous sync logs — forcing full scan')
-
   try {
+    // Mark any previous successful sync logs as superseded so getLastSyncTime()
+    // returns null and the sync always runs a full scan (companyID >= 1).
+    // This is required because the Autotask Opportunities entity has no
+    // lastModifiedDate field — incremental filters cause a 500 error.
+    const admin = createAdminSupabaseClient()
+    await admin
+      .from('import_logs')
+      .update({ status: 'superseded' })
+      .eq('filename', 'autotask-api')
+      .eq('status', 'success')
+    console.log('[api/autotask/sync] Cleared previous sync logs — forcing full scan')
+
     const result = await syncOpportunities(triggeredBy)
     return NextResponse.json(result)
   } catch (err) {
