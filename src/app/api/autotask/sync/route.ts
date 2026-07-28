@@ -29,25 +29,31 @@ export async function POST(request: NextRequest) {
   // Suppress unused warning — request used for auth check below
   void request
 
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
 
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+    }
+
+    const admin = createAdminSupabaseClient()
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+
+    if (!profile || !['admin', 'sales_manager'].includes(profile.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    return await runSync(user.email ?? user.id)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Sync request failed'
+    console.error('[api/autotask/sync] Auth/setup error:', message)
+    return NextResponse.json({ error: message }, { status: 500 })
   }
-
-  const admin = createAdminSupabaseClient()
-  const { data: profile } = await admin
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile || !['admin', 'sales_manager'].includes(profile.role)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
-  return runSync(user.email ?? user.id)
 }
 
 // ── Shared sync runner ────────────────────────────────────────
