@@ -12,6 +12,10 @@ import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
 import { AutotaskClient } from '@/lib/autotask/client'
 import { syncOpportunities } from '@/lib/autotask/sync'
 
+// Full multi-entity Autotask sync can run past the platform's default
+// serverless timeout; raise it to the Hobby-plan ceiling.
+export const maxDuration = 60
+
 // ── Vercel cron: GET with Authorization: Bearer CRON_SECRET ──
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET
