@@ -8,11 +8,40 @@ import { fetchOpportunityPicklists } from './picklists'
 import { buildResourceMap, buildCompanyMap, transformOpportunity } from './transform'
 import { syncMeetings } from './meetings'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/supabase/pagination'
 import type { AutotaskOpportunity, AutotaskCompany, AutotaskResource, AutotaskContact, SyncResult } from './types'
 
 const BATCH_SIZE      = 1000
 const SYNC_LOG_FILE   = 'autotask-api'
 const MEETINGS_LOG_FILE = 'autotask-meetings'
+
+// Opportunities untouched (lastActivityDate unchanged) for longer than this
+// are considered settled — already synced once, no need to re-write them on
+// every run. Override with AUTOTASK_SYNC_AGE_CUTOFF_YEARS if needed.
+const AGE_CUTOFF_YEARS = Number(process.env.AUTOTASK_SYNC_AGE_CUTOFF_YEARS ?? 2)
+const AGE_CUTOFF_MS    = AGE_CUTOFF_YEARS * 365 * 86_400_000
+
+// Existing DB snapshot used to detect "aged and unchanged" opportunities —
+// keyed by autotask_id, value is the last_activity we stored for it.
+async function fetchExistingActivitySnapshot(
+  admin: ReturnType<typeof createAdminSupabaseClient>
+): Promise<Map<number, string | null>> {
+  try {
+    const rows = await fetchAllRows<{ autotask_id: number; last_activity: string | null }>(
+      admin,
+      (client, from, to) => client
+        .from('opportunities')
+        .select('autotask_id, last_activity')
+        .not('autotask_id', 'is', null)
+        .order('id', { ascending: true })
+        .range(from, to)
+    )
+    return new Map(rows.map(r => [r.autotask_id, r.last_activity]))
+  } catch (err) {
+    console.warn(`[autotask/sync] Existing snapshot fetch failed (non-fatal, all records will be processed): ${err instanceof Error ? err.message : err}`)
+    return new Map()
+  }
+}
 
 async function getLastSyncTime(): Promise<string | null> {
   const admin = createAdminSupabaseClient()
@@ -93,23 +122,26 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
       return []
     })
 
-  const [rawOpps, picklists, resources, companies, contacts] = await Promise.all([
+  const [rawOpps, picklists, resources, companies, contacts, existingActivity] = await Promise.all([
     client.queryAll<AutotaskOpportunity>('Opportunities', oppFilter),
     fetchOpportunityPicklists(client),
     resourcesPromise,
     companiesPromise,
     contactsPromise,
+    fetchExistingActivitySnapshot(admin),
   ])
   console.log(`[autotask/sync] Fetched ${rawOpps.length} opportunities`)
   console.log(`[autotask/sync] Fetched ${resources.length} resources`)
   console.log(`[autotask/sync] Fetched ${companies.length} companies`)
   console.log(`[autotask/sync] Fetched ${contacts.length} contacts`)
+  console.log(`[autotask/sync] Existing DB snapshot: ${existingActivity.size} opportunities`)
 
   const result: Omit<SyncResult, 'duration_ms' | 'sync_type'> = {
     rows_processed: rawOpps.length,
     rows_inserted:  0,
     rows_updated:   0,
     rows_skipped:   0,
+    rows_unchanged: 0,
     errors:         [],
     status:         'success',
   }
@@ -127,6 +159,8 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   // ── 7. Transform rows ───────────────────────────────────────
   const records: Record<string, unknown>[] = []
 
+  const cutoffMs = Date.now() - AGE_CUTOFF_MS
+
   rawOpps.forEach((opp, idx) => {
     try {
       if (!opp.title?.trim()) {
@@ -134,6 +168,25 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
         result.rows_skipped++
         return
       }
+
+      // Skip aged, unchanged opportunities — already in the DB, last touched
+      // (per Autotask's lastActivityDate, falling back to createDate) before
+      // the cutoff, and that date hasn't moved since we last stored it. Still
+      // fetched from Autotask every run (the API doesn't support filtering
+      // Opportunities by date), but skipping the write here is what actually
+      // cuts sync time — most of the record volume is settled, years-old deals.
+      if (existingActivity.has(opp.id)) {
+        const referenceMs = opp.lastActivityDate
+          ? new Date(opp.lastActivityDate).getTime()
+          : opp.createDate ? new Date(opp.createDate).getTime() : null
+        const currentActivityIso = opp.lastActivityDate ? new Date(opp.lastActivityDate).toISOString() : null
+
+        if (referenceMs != null && referenceMs < cutoffMs && existingActivity.get(opp.id) === currentActivityIso) {
+          result.rows_unchanged++
+          return
+        }
+      }
+
       records.push(transformOpportunity(opp, maps))
     } catch (err) {
       result.errors.push({
@@ -271,7 +324,8 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
 
   console.log(
     `[autotask/sync] Done: ${result.rows_inserted} inserted, ` +
-    `${result.rows_updated} updated, ${result.rows_skipped} skipped. ` +
+    `${result.rows_updated} updated, ${result.rows_skipped} skipped, ` +
+    `${result.rows_unchanged} unchanged (aged, not re-written). ` +
     `${final.duration_ms}ms`
   )
 

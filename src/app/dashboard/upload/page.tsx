@@ -270,12 +270,13 @@ export default function UploadPage() {
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-5 gap-3">
             {[
-              { label: 'Processed', value: syncResult.rows_processed, color: 'text-gray-700' },
-              { label: 'Inserted',  value: syncResult.rows_inserted,  color: 'text-green-700' },
-              { label: 'Updated',   value: syncResult.rows_updated,   color: 'text-blue-700'  },
-              { label: 'Skipped',   value: syncResult.rows_skipped,   color: 'text-amber-700' },
+              { label: 'Processed',  value: syncResult.rows_processed,  color: 'text-gray-700' },
+              { label: 'Inserted',   value: syncResult.rows_inserted,   color: 'text-green-700' },
+              { label: 'Updated',    value: syncResult.rows_updated,    color: 'text-blue-700'  },
+              { label: 'Skipped',    value: syncResult.rows_skipped,    color: 'text-amber-700' },
+              { label: 'Unchanged',  value: syncResult.rows_unchanged,  color: 'text-slate-500' },
             ].map(item => (
               <div key={item.label} className="bg-white rounded-lg p-3 text-center border border-green-100">
                 <p className={`text-xl font-bold ${item.color}`}>{item.value}</p>

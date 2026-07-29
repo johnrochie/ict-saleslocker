@@ -120,6 +120,10 @@ export interface SyncResult {
   rows_inserted: number
   rows_updated: number
   rows_skipped: number
+  // Aged opportunities (older than the sync age cutoff) whose lastActivityDate
+  // hasn't changed since the last sync — fetched from Autotask but not
+  // re-written to the DB, since nothing about them has changed.
+  rows_unchanged: number
   errors: Array<{ row: number; message: string }>
   status: 'success' | 'partial' | 'failed'
   sync_type: 'full' | 'incremental'
