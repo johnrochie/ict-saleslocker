@@ -10,7 +10,7 @@ import { syncMeetings } from './meetings'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import type { AutotaskOpportunity, AutotaskCompany, AutotaskResource, AutotaskContact, SyncResult } from './types'
 
-const BATCH_SIZE      = 500
+const BATCH_SIZE      = 1000
 const SYNC_LOG_FILE   = 'autotask-api'
 const MEETINGS_LOG_FILE = 'autotask-meetings'
 
@@ -61,38 +61,49 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   const syncType   = 'full' as const
   console.log(`[autotask/sync] v5 starting ${syncType} sync. lastSyncAt=${lastSyncAt ?? 'none'}. triggeredBy=${triggeredBy}`)
 
-  // ── 2. Fetch opportunities (always full) ────────────────────
+  // ── 2-5. Fetch opportunities, picklists, resources, companies and
+  // contacts concurrently — these are all independent reads, and running
+  // them in sequence was the single biggest contributor to sync runs
+  // exceeding the platform's function timeout.
   const oppFilter = [{ op: 'gte', field: 'companyID', value: 1 }]
 
-  const rawOpps = await client.queryAll<AutotaskOpportunity>('Opportunities', oppFilter)
+  const companiesPromise: Promise<AutotaskCompany[]> = client
+    .queryAll<AutotaskCompany>('Companies', FILTER_ALL)
+    .catch(async () => {
+      console.warn('[autotask/sync] Companies entity failed, trying Accounts...')
+      try {
+        return await client.queryAll<AutotaskCompany>('Accounts', FILTER_ALL)
+      } catch (err2) {
+        console.warn(`[autotask/sync] Company lookup unavailable (non-fatal): ${err2 instanceof Error ? err2.message : err2}`)
+        return []
+      }
+    })
+
+  const resourcesPromise: Promise<AutotaskResource[]> = client
+    .queryAll<AutotaskResource>('Resources', FILTER_ACTIVE)
+    .catch(err => {
+      console.warn(`[autotask/sync] Resources fetch failed (non-fatal): ${err instanceof Error ? err.message : err}`)
+      return []
+    })
+
+  const contactsPromise: Promise<AutotaskContact[]> = client
+    .queryAll<AutotaskContact>('Contacts', FILTER_ACTIVE)
+    .catch(err => {
+      console.warn(`[autotask/sync] Contacts fetch failed (non-fatal): ${err instanceof Error ? err.message : err}`)
+      return []
+    })
+
+  const [rawOpps, picklists, resources, companies, contacts] = await Promise.all([
+    client.queryAll<AutotaskOpportunity>('Opportunities', oppFilter),
+    fetchOpportunityPicklists(client),
+    resourcesPromise,
+    companiesPromise,
+    contactsPromise,
+  ])
   console.log(`[autotask/sync] Fetched ${rawOpps.length} opportunities`)
-
-  // ── 3. Fetch picklists ──────────────────────────────────────
-  const picklists = await fetchOpportunityPicklists(client)
-
-  // ── 4. Fetch resources (non-fatal) ──────────────────────────
-  let resources: AutotaskResource[] = []
-  try {
-    resources = await client.queryAll<AutotaskResource>('Resources', FILTER_ACTIVE)
-    console.log(`[autotask/sync] Fetched ${resources.length} resources`)
-  } catch (err) {
-    console.warn(`[autotask/sync] Resources fetch failed (non-fatal): ${err instanceof Error ? err.message : err}`)
-  }
-
-  // ── 5. Fetch companies ──────────────────────────────────────
-  let companies: AutotaskCompany[] = []
-  try {
-    companies = await client.queryAll<AutotaskCompany>('Companies', FILTER_ALL)
-    console.log(`[autotask/sync] Fetched ${companies.length} companies`)
-  } catch {
-    console.warn('[autotask/sync] Companies entity failed, trying Accounts...')
-    try {
-      companies = await client.queryAll<AutotaskCompany>('Accounts', FILTER_ALL)
-      console.log(`[autotask/sync] Fetched ${companies.length} accounts`)
-    } catch (err2) {
-      console.warn(`[autotask/sync] Company lookup unavailable (non-fatal): ${err2 instanceof Error ? err2.message : err2}`)
-    }
-  }
+  console.log(`[autotask/sync] Fetched ${resources.length} resources`)
+  console.log(`[autotask/sync] Fetched ${companies.length} companies`)
+  console.log(`[autotask/sync] Fetched ${contacts.length} contacts`)
 
   const result: Omit<SyncResult, 'duration_ms' | 'sync_type'> = {
     rows_processed: rawOpps.length,
@@ -200,13 +211,6 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
   // sync trigger, but logged as its own import_logs row for visibility.
   let meetingsResult: SyncResult['meetings']
   try {
-    let contacts: AutotaskContact[] = []
-    try {
-      contacts = await client.queryAll<AutotaskContact>('Contacts', FILTER_ACTIVE)
-      console.log(`[autotask/sync] Fetched ${contacts.length} contacts`)
-    } catch (err) {
-      console.warn(`[autotask/sync] Contacts fetch failed (non-fatal): ${err instanceof Error ? err.message : err}`)
-    }
     const contactMap = new Map(
       contacts.map(c => [c.id, `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || `Contact#${c.id}`])
     )
