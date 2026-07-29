@@ -179,9 +179,17 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
         const referenceMs = opp.lastActivityDate
           ? new Date(opp.lastActivityDate).getTime()
           : opp.createDate ? new Date(opp.createDate).getTime() : null
-        const currentActivityIso = opp.lastActivityDate ? new Date(opp.lastActivityDate).toISOString() : null
 
-        if (referenceMs != null && referenceMs < cutoffMs && existingActivity.get(opp.id) === currentActivityIso) {
+        // Compare as timestamps, not strings — Postgres/PostgREST returns
+        // timestamptz values as "...+00:00", while JS's toISOString() produces
+        // "...Z" for the same instant. A string comparison here almost never
+        // matches even when nothing changed.
+        const existingRaw = existingActivity.get(opp.id)
+        const existingMs  = existingRaw ? new Date(existingRaw).getTime() : null
+        const currentMs   = opp.lastActivityDate ? new Date(opp.lastActivityDate).getTime() : null
+        const unchanged   = existingMs === currentMs
+
+        if (referenceMs != null && referenceMs < cutoffMs && unchanged) {
           result.rows_unchanged++
           return
         }

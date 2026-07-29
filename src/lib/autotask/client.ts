@@ -5,6 +5,7 @@
 import type { AutotaskField, AutotaskQueryResponse } from './types'
 
 let cachedBaseUrl: string | null = null
+let baseUrlPromise: Promise<string> | null = null
 
 export class AutotaskClient {
   private readonly username: string
@@ -40,26 +41,38 @@ export class AutotaskClient {
   async getBaseUrl(): Promise<string> {
     if (cachedBaseUrl) return cachedBaseUrl
 
-    const url =
-      `https://webservices.autotask.net/atservicesrest/v1.0/zoneInformation` +
-      `?user=${encodeURIComponent(this.username)}`
+    // Several entity fetches kick off concurrently and all call this on the
+    // first request of a sync — share one in-flight lookup instead of firing
+    // a zone-detection request per caller.
+    if (!baseUrlPromise) {
+      baseUrlPromise = (async () => {
+        const url =
+          `https://webservices.autotask.net/atservicesrest/v1.0/zoneInformation` +
+          `?user=${encodeURIComponent(this.username)}`
 
-    const res = await fetch(url, { headers: this.authHeaders() })
+        const res = await fetch(url, { headers: this.authHeaders() })
 
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      throw new Error(
-        `Autotask zone detection failed (${res.status}). ` +
-        `Check AUTOTASK_USERNAME is correct. Response: ${body.slice(0, 200)}`
-      )
+        if (!res.ok) {
+          const body = await res.text().catch(() => '')
+          throw new Error(
+            `Autotask zone detection failed (${res.status}). ` +
+            `Check AUTOTASK_USERNAME is correct. Response: ${body.slice(0, 200)}`
+          )
+        }
+
+        const data = await res.json() as { url: string; webUrl?: string }
+        // Zone URL may or may not include /v1.0 — normalise to always have it
+        const raw = (data.url ?? data.webUrl ?? '').replace(/\/+$/, '')
+        cachedBaseUrl = raw.includes('/v1.0') ? raw : `${raw}/v1.0`
+        console.log(`[autotask/client] Base URL: ${cachedBaseUrl}`)
+        return cachedBaseUrl
+      })().catch(err => {
+        baseUrlPromise = null  // allow retry on next call after a failure
+        throw err
+      })
     }
 
-    const data = await res.json() as { url: string; webUrl?: string }
-    // Zone URL may or may not include /v1.0 — normalise to always have it
-    const raw = (data.url ?? data.webUrl ?? '').replace(/\/+$/, '')
-    cachedBaseUrl = raw.includes('/v1.0') ? raw : `${raw}/v1.0`
-    console.log(`[autotask/client] Base URL: ${cachedBaseUrl}`)
-    return cachedBaseUrl
+    return baseUrlPromise
   }
 
   async get<T>(path: string): Promise<T> {
