@@ -11,7 +11,8 @@ import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { fetchAllRows } from '@/lib/supabase/pagination'
 import type { AutotaskOpportunity, AutotaskCompany, AutotaskResource, AutotaskContact, SyncResult } from './types'
 
-const BATCH_SIZE      = 1000
+const BATCH_SIZE      = 500
+const RECONCILE_CONCURRENCY = 20
 const SYNC_LOG_FILE   = 'autotask-api'
 const MEETINGS_LOG_FILE = 'autotask-meetings'
 
@@ -21,26 +22,61 @@ const MEETINGS_LOG_FILE = 'autotask-meetings'
 const AGE_CUTOFF_YEARS = Number(process.env.AUTOTASK_SYNC_AGE_CUTOFF_YEARS ?? 2)
 const AGE_CUTOFF_MS    = AGE_CUTOFF_YEARS * 365 * 86_400_000
 
-// Existing DB snapshot used to detect "aged and unchanged" opportunities —
-// keyed by autotask_id, value is the last_activity we stored for it.
-async function fetchExistingActivitySnapshot(
+interface ExistingRow {
+  id: string
+  autotask_id: number | null
+  composite_key: string | null
+  last_activity: string | null
+}
+
+interface ExistingSnapshot {
+  byAutotaskId:   Map<number, string | null>                        // autotask_id -> last_activity
+  byCompositeKey: Map<string, { id: string; autotask_id: number | null }>
+}
+
+// One pass over the whole opportunities table, used two ways:
+//  - byAutotaskId detects "aged and unchanged" API records to skip re-writing.
+//  - byCompositeKey detects rows (often CSV-imported, autotask_id null) that
+//    already occupy the composite_key a fresh API record would need, so they
+//    can be reconciled via UPDATE instead of failing a bulk INSERT.
+async function fetchExistingSnapshot(
   admin: ReturnType<typeof createAdminSupabaseClient>
-): Promise<Map<number, string | null>> {
+): Promise<ExistingSnapshot> {
   try {
-    const rows = await fetchAllRows<{ autotask_id: number; last_activity: string | null }>(
+    const rows = await fetchAllRows<ExistingRow>(
       admin,
       (client, from, to) => client
         .from('opportunities')
-        .select('autotask_id, last_activity')
-        .not('autotask_id', 'is', null)
+        .select('id, autotask_id, composite_key, last_activity')
         .order('id', { ascending: true })
         .range(from, to)
     )
-    return new Map(rows.map(r => [r.autotask_id, r.last_activity]))
+    const byAutotaskId = new Map<number, string | null>()
+    const byCompositeKey = new Map<string, { id: string; autotask_id: number | null }>()
+    rows.forEach(r => {
+      if (r.autotask_id != null) byAutotaskId.set(r.autotask_id, r.last_activity)
+      if (r.composite_key)       byCompositeKey.set(r.composite_key, { id: r.id, autotask_id: r.autotask_id })
+    })
+    return { byAutotaskId, byCompositeKey }
   } catch (err) {
     console.warn(`[autotask/sync] Existing snapshot fetch failed (non-fatal, all records will be processed): ${err instanceof Error ? err.message : err}`)
-    return new Map()
+    return { byAutotaskId: new Map(), byCompositeKey: new Map() }
   }
+}
+
+// Run async work over items with bounded concurrency instead of either a full
+// Promise.all (unbounded, can overwhelm the DB) or a sequential loop (slow —
+// this is what caused a full batch's worth of row-by-row retries to blow the
+// function timeout).
+async function runWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let idx = 0
+  async function worker() {
+    while (idx < items.length) {
+      const item = items[idx++]
+      await fn(item)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
 }
 
 async function getLastSyncTime(): Promise<string | null> {
@@ -122,19 +158,20 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
       return []
     })
 
-  const [rawOpps, picklists, resources, companies, contacts, existingActivity] = await Promise.all([
+  const [rawOpps, picklists, resources, companies, contacts, existing] = await Promise.all([
     client.queryAll<AutotaskOpportunity>('Opportunities', oppFilter),
     fetchOpportunityPicklists(client),
     resourcesPromise,
     companiesPromise,
     contactsPromise,
-    fetchExistingActivitySnapshot(admin),
+    fetchExistingSnapshot(admin),
   ])
+  const existingActivity = existing.byAutotaskId
   console.log(`[autotask/sync] Fetched ${rawOpps.length} opportunities`)
   console.log(`[autotask/sync] Fetched ${resources.length} resources`)
   console.log(`[autotask/sync] Fetched ${companies.length} companies`)
   console.log(`[autotask/sync] Fetched ${contacts.length} contacts`)
-  console.log(`[autotask/sync] Existing DB snapshot: ${existingActivity.size} opportunities`)
+  console.log(`[autotask/sync] Existing DB snapshot: ${existingActivity.size} opportunities, ${existing.byCompositeKey.size} composite keys`)
 
   const result: Omit<SyncResult, 'duration_ms' | 'sync_type'> = {
     rows_processed: rawOpps.length,
@@ -223,12 +260,50 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
 
   console.log(`[autotask/sync] After dedup: ${dedupedRecords.length} (raw: ${records.length})`)
 
+  // ── 7c. Split off composite_key collisions before batching ─────
+  // A record collides when its composite_key (company + title + create date)
+  // already belongs to a DIFFERENT row — typically a CSV-imported opportunity
+  // that predates the API sync and has no autotask_id yet. ON CONFLICT only
+  // covers autotask_id, so Postgres rejects the whole batch INSERT for these.
+  // Detecting them upfront and reconciling via UPDATE (attaching the correct
+  // autotask_id to the existing row) fixes them permanently instead of
+  // failing the same way on every future run.
+  const toReconcile: Array<{ id: string; record: Record<string, unknown> }> = []
+  const toUpsert: Record<string, unknown>[] = []
+
+  dedupedRecords.forEach(record => {
+    const ck = record.composite_key as string | undefined
+    const existingForKey = ck ? existing.byCompositeKey.get(ck) : undefined
+    if (existingForKey && existingForKey.autotask_id !== record.autotask_id) {
+      toReconcile.push({ id: existingForKey.id, record })
+    } else {
+      toUpsert.push(record)
+    }
+  })
+
+  if (toReconcile.length > 0) {
+    console.log(`[autotask/sync] Reconciling ${toReconcile.length} composite_key collision(s) via UPDATE`)
+    await runWithConcurrency(toReconcile, RECONCILE_CONCURRENCY, async ({ id, record }) => {
+      const { error } = await admin.from('opportunities').update(record).eq('id', id)
+      if (error) {
+        console.error(`[autotask/sync] Reconcile failed (autotask_id ${record.autotask_id}): ${error.message}`)
+        result.errors.push({
+          row: 0,
+          message: `autotask_id ${record.autotask_id} (${record.company as string} / ${record.opportunity_name as string}): ${error.message}`,
+        })
+        result.rows_skipped++
+      } else {
+        result.rows_updated++
+      }
+    })
+  }
+
   // ── 8. Batch upsert ─────────────────────────────────────────
   // Upsert on autotask_id — the authoritative key for API records.
   // Updates existing API records in place; inserts new ones without
   // creating duplicates alongside any remaining CSV-imported rows.
-  for (let i = 0; i < dedupedRecords.length; i += BATCH_SIZE) {
-    const batch = dedupedRecords.slice(i, i + BATCH_SIZE)
+  for (let i = 0; i < toUpsert.length; i += BATCH_SIZE) {
+    const batch = toUpsert.slice(i, i + BATCH_SIZE)
 
     const { data, error } = await admin
       .from('opportunities')
@@ -236,15 +311,14 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
       .select('id, created_at, updated_at')
 
     if (error) {
-      // A single row can collide with another record on the composite_key
-      // unique constraint (e.g. same company + title + create date under a
-      // different autotask_id) — ON CONFLICT only covers autotask_id, so
-      // Postgres rejects the whole multi-row INSERT. Retry row-by-row so one
-      // bad record can't take out the other ~499 legitimate ones with it.
+      // Shouldn't normally happen now that known collisions are pre-filtered
+      // above — treat as a rare edge case (e.g. a genuine race) and retry
+      // the batch's rows concurrently rather than one at a time, so a single
+      // bad record can't drag the whole batch through 500 sequential round-trips.
       console.warn(
-        `[autotask/sync] Batch ${Math.floor(i / BATCH_SIZE) + 1} upsert failed (${error.message}) — retrying row-by-row`
+        `[autotask/sync] Batch ${Math.floor(i / BATCH_SIZE) + 1} upsert failed (${error.message}) — retrying concurrently, row-by-row`
       )
-      for (const row of batch) {
+      await runWithConcurrency(batch, RECONCILE_CONCURRENCY, async row => {
         const { data: rowData, error: rowError } = await admin
           .from('opportunities')
           .upsert(row, { onConflict: 'autotask_id', ignoreDuplicates: false })
@@ -253,14 +327,14 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
         if (rowError) {
           console.error(`[autotask/sync] Row upsert failed (autotask_id ${row.autotask_id}): ${rowError.message}`)
           result.errors.push({
-            row: i,
+            row: 0,
             message: `autotask_id ${row.autotask_id} (${row.company as string} / ${row.opportunity_name as string}): ${rowError.message}`,
           })
           result.rows_skipped++
-          continue
+          return
         }
         countResults(rowData, result)
-      }
+      })
       continue
     }
 
