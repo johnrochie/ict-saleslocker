@@ -38,6 +38,7 @@ export default function WinsSummaryClient({ all, year }: { all: Opportunity[]; y
   const [dateTo,   setDateTo]   = useState(toInputDate(new Date(year, 11, 31)))
   const [excludeTestAccounts, setExcludeTestAccounts] = useState(true)
   const [excludeTensorX,      setExcludeTensorX]      = useState(true)
+  const [selectedCat, setSelectedCat] = useState<string | null>(null)
 
   // Drop internal/test accounts and/or TensorX before anything else derives from it.
   const base = useMemo(() => {
@@ -116,6 +117,15 @@ export default function WinsSummaryClient({ all, year }: { all: Opportunity[]; y
       .sort((a, b) => b.rev - a.rev)
       .slice(0, 10)
   }, [won])
+
+  // Top 10 deals in the currently selected category, by value.
+  const topCatDeals = useMemo(() => {
+    if (!selectedCat) return []
+    return won
+      .filter(o => (o.category || 'Uncategorised') === selectedCat)
+      .sort((a, b) => b.revenue_total - a.revenue_total)
+      .slice(0, 10)
+  }, [won, selectedCat])
 
   const maxChart = Math.max(...chartRows.map(r => r.rev), 1)
   const dateStr  = today.toLocaleDateString('en-IE', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -235,7 +245,7 @@ export default function WinsSummaryClient({ all, year }: { all: Opportunity[]; y
               <thead><tr><th>Category</th><th className="r">Deals</th><th className="r">Revenue</th><th className="r">% Value</th></tr></thead>
               <tbody>
                 {catRows.map((row, i) => (
-                  <tr key={row.name}>
+                  <tr key={row.name} onClick={() => setSelectedCat(row.name)} style={{ cursor: 'pointer' }} title="Click for top 10 deals">
                     <td><div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                       <div style={{ width: 8, height: 8, borderRadius: 2, background: BAR_PALETTE[i % BAR_PALETTE.length], flexShrink: 0 }} />
                       {row.name}
@@ -310,6 +320,42 @@ export default function WinsSummaryClient({ all, year }: { all: Opportunity[]; y
       <div style={{ textAlign: 'center', padding: '12px 0 20px', color: '#94a3b8', fontSize: 11, borderTop: '1px solid #e2e8f0', marginTop: 8 }}>
         ICT Services &nbsp;·&nbsp; {dateStr} &nbsp;·&nbsp; Confidential — internal use only
       </div>
+
+      {/* CATEGORY DRILL-DOWN MODAL */}
+      {selectedCat && (
+        <div className="no-print" onClick={() => setSelectedCat(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: 'white', borderRadius: 10, width: '100%', maxWidth: 720, maxHeight: '80vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ background: '#1e3a5f', color: 'white', padding: '12px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 13, fontWeight: 700 }}>Top {topCatDeals.length} — {selectedCat} (Won)</span>
+              <button onClick={() => setSelectedCat(null)}
+                style={{ background: 'transparent', border: 'none', color: 'white', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ overflowY: 'auto' }}>
+              <table className="ps-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr><th>#</th><th>Company</th><th>Deal</th><th>Closed</th><th className="r">Value</th></tr></thead>
+                <tbody>
+                  {topCatDeals.map((o, i) => (
+                    <tr key={o.id}>
+                      <td style={{ color: '#94a3b8' }}>{i + 1}</td>
+                      <td style={{ fontWeight: 600 }}>{o.company}</td>
+                      <td style={{ color: '#64748b' }}>{o.opportunity_name}</td>
+                      <td style={{ color: '#1e293b' }}>
+                        {o.closed_date ? new Date(o.closed_date).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                      </td>
+                      <td className="r" style={{ fontWeight: 700, color: '#16a34a' }}>{euros(o.revenue_total)}</td>
+                    </tr>
+                  ))}
+                  {topCatDeals.length === 0 && (
+                    <tr><td colSpan={5} style={{ textAlign: 'center', color: '#94a3b8', padding: 20 }}>No deals found</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
