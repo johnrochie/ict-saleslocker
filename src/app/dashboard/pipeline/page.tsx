@@ -45,7 +45,7 @@ export default async function PipelinePage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Pipeline</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Active, On Hold, and Stale opportunities</p>
+        <p className="text-sm text-gray-500 mt-0.5">Active and On Hold opportunities — Quarantine tracked separately below</p>
       </div>
       <PipelineTable
         opportunities={opps}

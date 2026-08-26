@@ -30,6 +30,22 @@ export default function PipelineTable({
   const [requestingId, setRequestingId] = useState<string | null>(null)
   const [approvalMap,  setApprovalMap]  = useState<Record<string, 'pending' | 'approved' | 'rejected'>>(existingApprovals)
   const [flash,        setFlash]        = useState<string | null>(null)
+  const [showQuarantine, setShowQuarantine] = useState(false)
+
+  // Quarantine/stale opportunities are tracked separately — they shouldn't
+  // count toward the active pipeline's totals or clutter its table.
+  const quarantineOpps = useMemo(
+    () => opportunities.filter(o => o.normalised_status === 'on_hold_stale'),
+    [opportunities]
+  )
+  const activeOpps = useMemo(
+    () => opportunities.filter(o => o.normalised_status !== 'on_hold_stale'),
+    [opportunities]
+  )
+  const quarantineRev = useMemo(
+    () => quarantineOpps.reduce((s, o) => s + o.revenue_total, 0),
+    [quarantineOpps]
+  )
 
   function showFlash(msg: string) {
     setFlash(msg)
@@ -55,20 +71,20 @@ export default function PipelineTable({
 
   // Unique filter options
   const owners = useMemo(() => {
-    const s = new Set(opportunities.map((o) =>
+    const s = new Set(activeOpps.map((o) =>
       o.account_manager ?? o.opportunity_owner ?? ''
     ).filter(Boolean))
     return Array.from(s).sort()
-  }, [opportunities])
+  }, [activeOpps])
 
   const categories = useMemo(() => {
-    const s = new Set(opportunities.map((o) => o.category ?? '').filter(Boolean))
+    const s = new Set(activeOpps.map((o) => o.category ?? '').filter(Boolean))
     return Array.from(s).sort()
-  }, [opportunities])
+  }, [activeOpps])
 
   // Filter + sort
   const filtered = useMemo(() => {
-    return opportunities
+    return activeOpps
       .filter((o) => {
         const q = search.toLowerCase()
         if (q && !o.company.toLowerCase().includes(q) &&
@@ -92,7 +108,7 @@ export default function PipelineTable({
         }
         return dir * ((a[sortField] ?? 0) - (b[sortField] ?? 0))
       })
-  }, [opportunities, search, filterOwner, filterCat, filterStatus, sortField, sortDir])
+  }, [activeOpps, search, filterOwner, filterCat, filterStatus, sortField, sortDir])
 
   function toggleSort(field: SortField) {
     if (sortField === field) {
@@ -140,7 +156,6 @@ export default function PipelineTable({
           <option value="">All Statuses</option>
           <option value="pipeline">Pipeline</option>
           <option value="on_hold">On Hold</option>
-          <option value="on_hold_stale">Stale</option>
         </select>
         <select
           value={filterOwner}
@@ -167,6 +182,14 @@ export default function PipelineTable({
         <span className="text-sm text-gray-400 shrink-0">
           {filtered.length} results
         </span>
+        {quarantineOpps.length > 0 && (
+          <button
+            onClick={() => setShowQuarantine(v => !v)}
+            className="ml-auto shrink-0 rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-700 hover:bg-orange-100"
+          >
+            {showQuarantine ? 'Hide' : 'Show'} Quarantine ({quarantineOpps.length} · {formatCompact(quarantineRev)})
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -344,6 +367,65 @@ export default function PipelineTable({
           )}
         </table>
       </div>
+
+      {/* Quarantine — kept separate from the active pipeline above */}
+      {showQuarantine && quarantineOpps.length > 0 && (
+        <div className="border-t border-gray-100">
+          <div className="px-4 py-3 bg-orange-50/50 border-b border-orange-100">
+            <p className="text-sm font-medium text-orange-800">
+              Quarantine / Stale — {quarantineOpps.length} opportunities, {formatCompact(quarantineRev)}
+            </p>
+            <p className="text-xs text-orange-600 mt-0.5">
+              Not counted in the active pipeline totals above.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs font-medium text-gray-400 uppercase tracking-wide border-b border-gray-100">
+                  <th className="text-left px-4 py-3">Company</th>
+                  <th className="text-left px-4 py-3">Opportunity</th>
+                  <th className="text-left px-4 py-3">Rep</th>
+                  <th className="text-left px-4 py-3">Category</th>
+                  <th className="text-right px-4 py-3">Revenue</th>
+                  <th className="text-right px-4 py-3">Last Activity</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {quarantineOpps
+                  .slice()
+                  .sort((a, b) => b.revenue_total - a.revenue_total)
+                  .map((opp) => {
+                    const ownerRaw = opp.account_manager ?? opp.opportunity_owner ?? '—'
+                    const owner = ownerRaw.includes(',')
+                      ? ownerRaw.split(',').map((s: string) => s.trim()).reverse().join(' ')
+                      : ownerRaw
+                    return (
+                      <tr key={opp.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3 font-medium text-gray-900 max-w-[150px]">
+                          <span className="truncate block" title={opp.company}>{opp.company}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-700 max-w-[220px]">
+                          <span className="truncate block" title={opp.opportunity_name}>{opp.opportunity_name}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{owner}</td>
+                        <td className="px-4 py-3 text-gray-500 max-w-[150px]">
+                          <span className="truncate block" title={opp.category ?? ''}>{opp.category ?? '—'}</span>
+                        </td>
+                        <td className="px-4 py-3 text-right font-medium text-gray-900 whitespace-nowrap">
+                          {formatCompact(opp.revenue_total)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-gray-500 whitespace-nowrap">
+                          {formatDate(opp.last_activity)}
+                        </td>
+                      </tr>
+                    )
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
