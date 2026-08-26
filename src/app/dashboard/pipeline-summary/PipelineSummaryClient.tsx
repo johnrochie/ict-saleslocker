@@ -19,6 +19,14 @@ const TENSORX_COMPANIES_RAW = ['TensorX Limited']
 const TENSORX_COMPANIES     = TENSORX_COMPANIES_RAW.map(c => c.toLowerCase())
 const TENSORX_LABEL         = `Excludes: ${TENSORX_COMPANIES_RAW.join(', ')}`
 
+// On Hold deals get their own bucket rather than being folded into their
+// product category — they're not actively moving, so mixing them in with
+// real category totals hides which categories are actually being worked.
+function effectiveCategory(o: Opportunity): string {
+  if (o.normalised_status === 'on_hold') return 'On Hold'
+  return o.category || 'Uncategorised'
+}
+
 function stageColour(name: string, idx: number): string {
   const l = name.toLowerCase()
   if (l.includes('won') || l === 'win') return '#16a34a'
@@ -118,7 +126,7 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
     const map = new Map<string, { count: number; rev: number }>()
     const total = openPipeline.reduce((s, o) => s + o.revenue_total, 0)
     openPipeline.forEach(o => {
-      const cat = o.category || 'Uncategorised'
+      const cat = effectiveCategory(o)
       if (!map.has(cat)) map.set(cat, { count: 0, rev: 0 })
       const e = map.get(cat)!; e.count++; e.rev += o.revenue_total
     })
@@ -143,7 +151,7 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
   const topCatDeals = useMemo(() => {
     if (!selectedCat) return []
     return openPipeline
-      .filter(o => (o.category || 'Uncategorised') === selectedCat)
+      .filter(o => effectiveCategory(o) === selectedCat)
       .sort((a, b) => b.revenue_total - a.revenue_total)
       .slice(0, 10)
   }, [openPipeline, selectedCat])
