@@ -11,9 +11,13 @@ function pct(n: number) { return `${n.toFixed(1)}%` }
 const BAR_PALETTE = ['#3b82f6','#8b5cf6','#06b6d4','#10b981','#f59e0b','#ec4899','#6366f1','#14b8a6']
 
 // Internal/test accounts that shouldn't count toward real pipeline or win figures.
-const EXCLUDED_COMPANIES_RAW = ['TensorX Limited', 'FAKE COMPANY TEST', 'ICT Services']
-const EXCLUDED_COMPANIES = EXCLUDED_COMPANIES_RAW.map(c => c.toLowerCase())
-const EXCLUDED_COMPANIES_LABEL = `Excludes: ${EXCLUDED_COMPANIES_RAW.join(', ')}`
+const TEST_COMPANIES_RAW    = ['FAKE COMPANY TEST', 'ICT Services']
+const TEST_COMPANIES        = TEST_COMPANIES_RAW.map(c => c.toLowerCase())
+const TEST_COMPANIES_LABEL  = `Excludes: ${TEST_COMPANIES_RAW.join(', ')}`
+
+const TENSORX_COMPANIES_RAW = ['TensorX Limited']
+const TENSORX_COMPANIES     = TENSORX_COMPANIES_RAW.map(c => c.toLowerCase())
+const TENSORX_LABEL         = `Excludes: ${TENSORX_COMPANIES_RAW.join(', ')}`
 
 function stageColour(name: string, idx: number): string {
   const l = name.toLowerCase()
@@ -33,12 +37,17 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
   const [dateFrom, setDateFrom] = useState(toInputDate(new Date(year, 0, 1)))
   const [dateTo,   setDateTo]   = useState(toInputDate(new Date(year, 11, 31)))
   const [excludeTestAccounts, setExcludeTestAccounts] = useState(true)
+  const [excludeTensorX,      setExcludeTensorX]      = useState(true)
 
-  // Drop internal/test accounts before anything else derives from it, when the toggle is on.
+  // Drop internal/test accounts and/or TensorX before anything else derives from it.
   const base = useMemo(() => {
-    if (!excludeTestAccounts) return all
-    return all.filter(o => !EXCLUDED_COMPANIES.includes((o.company || '').toLowerCase().trim()))
-  }, [all, excludeTestAccounts])
+    return all.filter(o => {
+      const company = (o.company || '').toLowerCase().trim()
+      if (excludeTestAccounts && TEST_COMPANIES.includes(company))    return false
+      if (excludeTensorX      && TENSORX_COMPANIES.includes(company)) return false
+      return true
+    })
+  }, [all, excludeTestAccounts, excludeTensorX])
 
   // Quick-select helpers
   function setRange(from: Date, to: Date) {
@@ -181,7 +190,7 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
           </div>
 
           <button onClick={() => setExcludeTestAccounts(v => !v)}
-            title={EXCLUDED_COMPANIES_LABEL}
+            title={TEST_COMPANIES_LABEL}
             style={{
               padding: '6px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer',
               border: excludeTestAccounts ? '1px solid #93c5fd' : '1px solid rgba(255,255,255,.25)',
@@ -189,6 +198,17 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
               color: 'white',
             }}>
             {excludeTestAccounts ? '✓ ' : ''}Hide test accounts
+          </button>
+
+          <button onClick={() => setExcludeTensorX(v => !v)}
+            title={TENSORX_LABEL}
+            style={{
+              padding: '6px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              border: excludeTensorX ? '1px solid #93c5fd' : '1px solid rgba(255,255,255,.25)',
+              background: excludeTensorX ? 'rgba(59,130,246,.35)' : 'rgba(255,255,255,.1)',
+              color: 'white',
+            }}>
+            {excludeTensorX ? '✓ ' : ''}Hide TensorX
           </button>
 
           <button onClick={() => window.print()}
