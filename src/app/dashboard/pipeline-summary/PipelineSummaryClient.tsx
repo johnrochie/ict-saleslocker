@@ -41,12 +41,19 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
     { label: 'All Time',  from: new Date(2018, 0, 1),      to: new Date(year+1, 11, 31) },
   ]
 
-  // Filter deals by created_date within range; always include open pipeline
-  const filtered = useMemo(() => {
+  // Current open pipeline — a live snapshot, deliberately NOT bound by the date range.
+  // An open deal doesn't belong to a "period" until it closes, so it's always shown in full.
+  const openPipeline = useMemo(
+    () => all.filter(o => o.normalised_status === 'pipeline' || o.normalised_status === 'on_hold'),
+    [all]
+  )
+
+  // Period activity — Won/Lost deals whose created_date falls inside the selected range.
+  const periodClosed = useMemo(() => {
     const from = new Date(dateFrom)
     const to   = new Date(dateTo); to.setHours(23, 59, 59)
     return all.filter(o => {
-      if (o.normalised_status === 'pipeline' || o.normalised_status === 'on_hold') return true
+      if (o.normalised_status !== 'won' && o.normalised_status !== 'lost') return false
       const d = o.created_date ? new Date(o.created_date) : null
       if (!d) return false
       return d >= from && d <= to
@@ -54,46 +61,41 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
   }, [all, dateFrom, dateTo])
 
   const metrics = useMemo(() => {
-    const pipeline = filtered.filter(o => o.normalised_status === 'pipeline')
-    const onHold   = filtered.filter(o => o.normalised_status === 'on_hold')
-    const won      = filtered.filter(o => o.normalised_status === 'won')
-    const lost     = filtered.filter(o => o.normalised_status === 'lost')
-    const open     = [...pipeline, ...onHold]
+    const pipeline = openPipeline.filter(o => o.normalised_status === 'pipeline')
+    const onHold   = openPipeline.filter(o => o.normalised_status === 'on_hold')
+    const won      = periodClosed.filter(o => o.normalised_status === 'won')
+    const lost     = periodClosed.filter(o => o.normalised_status === 'lost')
     return {
-      total:        filtered.length,
-      totalRev:     filtered.reduce((s, o) => s + o.revenue_total, 0),
-      avgDeal:      filtered.length ? filtered.reduce((s, o) => s + o.revenue_total, 0) / filtered.length : 0,
-      openRev:      open.reduce((s, o) => s + o.revenue_total, 0),
+      openCount:    openPipeline.length,
+      openRev:      openPipeline.reduce((s, o) => s + o.revenue_total, 0),
+      avgOpenDeal:  openPipeline.length ? openPipeline.reduce((s, o) => s + o.revenue_total, 0) / openPipeline.length : 0,
       pipeCount:    pipeline.length,  pipeRev:   pipeline.reduce((s, o) => s + o.revenue_total, 0),
       onHoldCount:  onHold.length,    onHoldRev: onHold.reduce((s, o) => s + o.revenue_total, 0),
       wonCount:     won.length,       wonRev:    won.reduce((s, o) => s + o.revenue_total, 0),
       lostCount:    lost.length,      lostRev:   lost.reduce((s, o) => s + o.revenue_total, 0),
     }
-  }, [filtered])
+  }, [openPipeline, periodClosed])
 
+  // Stage/category breakdowns describe the CURRENT open pipeline, not the selected period.
   const stageRows = useMemo(() => {
     const map = new Map<string, { count: number; rev: number; status: string }>()
-    filtered.forEach(o => {
-      let key: string
-      if (o.normalised_status === 'won')     key = 'Won'
-      else if (o.normalised_status === 'lost')    key = 'Lost'
-      else if (o.normalised_status === 'on_hold') key = 'On Hold'
-      else key = o.stage || 'Unknown'
+    openPipeline.forEach(o => {
+      const key = o.normalised_status === 'on_hold' ? 'On Hold' : (o.stage || 'Unknown')
       if (!map.has(key)) map.set(key, { count: 0, rev: 0, status: o.normalised_status })
       const e = map.get(key)!; e.count++; e.rev += o.revenue_total
     })
     return Array.from(map.entries())
       .map(([name, d]) => ({ name, ...d }))
       .sort((a, b) => {
-        const order = (s: string) => s === 'on_hold' ? 90 : s === 'lost' ? 95 : s === 'won' ? 99 : 0
+        const order = (s: string) => s === 'on_hold' ? 90 : 0
         return order(a.status) - order(b.status) || b.rev - a.rev
       })
-  }, [filtered])
+  }, [openPipeline])
 
   const catRows = useMemo(() => {
     const map = new Map<string, { count: number; rev: number }>()
-    const total = filtered.reduce((s, o) => s + o.revenue_total, 0)
-    filtered.forEach(o => {
+    const total = openPipeline.reduce((s, o) => s + o.revenue_total, 0)
+    openPipeline.forEach(o => {
       const cat = o.category || 'Uncategorised'
       if (!map.has(cat)) map.set(cat, { count: 0, rev: 0 })
       const e = map.get(cat)!; e.count++; e.rev += o.revenue_total
@@ -101,20 +103,19 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
     return Array.from(map.entries())
       .map(([name, d]) => ({ name, ...d, pctVal: total > 0 ? (d.rev / total) * 100 : 0 }))
       .sort((a, b) => b.rev - a.rev)
-  }, [filtered])
+  }, [openPipeline])
 
   const chartRows = useMemo(() => {
     const map = new Map<string, number>()
-    filtered.filter(o => o.normalised_status === 'pipeline' || o.normalised_status === 'on_hold')
-      .forEach(o => {
-        const key = o.normalised_status === 'on_hold' ? 'On Hold' : (o.stage || 'Unknown')
-        map.set(key, (map.get(key) || 0) + o.revenue_total)
-      })
+    openPipeline.forEach(o => {
+      const key = o.normalised_status === 'on_hold' ? 'On Hold' : (o.stage || 'Unknown')
+      map.set(key, (map.get(key) || 0) + o.revenue_total)
+    })
     return Array.from(map.entries())
       .map(([name, rev]) => ({ name, rev }))
       .sort((a, b) => b.rev - a.rev)
       .slice(0, 10)
-  }, [filtered])
+  }, [openPipeline])
 
   const maxChart = Math.max(...chartRows.map(r => r.rev), 1)
   const dateStr  = today.toLocaleDateString('en-IE', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -142,7 +143,7 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
             ICT Services &nbsp;—&nbsp; <span style={{ color: '#93c5fd' }}>Sales Pipeline Summary</span>
           </h1>
           <p style={{ margin: '2px 0 0', fontSize: 11, color: 'rgba(255,255,255,.45)' }}>
-            {periodLabel} &nbsp;·&nbsp; {filtered.length} records
+            {metrics.openCount} open now &nbsp;·&nbsp; {metrics.wonCount + metrics.lostCount} closed {periodLabel}
           </p>
         </div>
 
@@ -176,7 +177,7 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
 
       {/* Sub-header */}
       <div style={{ background: '#1e3a5f', color: 'white', padding: '7px 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase' }}>Sales Pipeline — By Stage &amp; Category</span>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase' }}>Current Open Pipeline — By Stage &amp; Category</span>
         <span style={{ fontSize: 11, color: 'rgba(255,255,255,.6)' }}>{dateStr}</span>
       </div>
 
@@ -185,17 +186,34 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
 
           {/* KEY METRICS */}
           <div style={{ background: 'white', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-            <div style={{ background: '#1e3a5f', color: 'white', padding: '8px 14px', fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase' }}>Key Metrics</div>
+            <div style={{ background: '#1e3a5f', color: 'white', padding: '8px 14px', fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between' }}>
+              <span>Current Open Pipeline</span>
+              <span style={{ color: 'rgba(255,255,255,.5)', textTransform: 'none', fontWeight: 600 }}>as of today — not affected by date range</span>
+            </div>
             <table className="ps-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
                 {[
-                  { label: 'Total opportunities',            val: metrics.total.toLocaleString('en-IE'),                        bold: false },
-                  { label: 'Total pipeline value (list)',    val: euros(metrics.totalRev),                                       bold: true  },
-                  { label: 'Avg deal size',                  val: euros(metrics.avgDeal),                                        bold: false },
-                  { label: 'Open pipeline (excl. Won/Lost)', val: euros(metrics.openRev),                                        bold: true  },
+                  { label: 'Total open opportunities',       val: metrics.openCount.toLocaleString('en-IE'),                     bold: false },
+                  { label: 'Total open pipeline value',       val: euros(metrics.openRev),                                       bold: true  },
+                  { label: 'Avg open deal size',              val: euros(metrics.avgOpenDeal),                                   bold: false },
                   { label: 'Active pipeline',                val: `${metrics.pipeCount} / ${euros(metrics.pipeRev)}`,            bold: false },
+                  { label: 'On hold',                        val: `${metrics.onHoldCount} / ${euros(metrics.onHoldRev)}`,        bold: false, color: '#d97706' },
+                ].map(row => (
+                  <tr key={row.label}>
+                    <td style={{ color: '#475569' }}>{row.label}</td>
+                    <td className="r" style={{ fontWeight: row.bold ? 800 : 600, color: (row as any).color || '#1e293b' }}>{row.val}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ background: '#1e3a5f', color: 'white', padding: '8px 14px', fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between' }}>
+              <span>Period Activity</span>
+              <span style={{ color: 'rgba(255,255,255,.5)', textTransform: 'none', fontWeight: 600 }}>{periodLabel}</span>
+            </div>
+            <table className="ps-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <tbody>
+                {[
                   { label: 'Won deals',                      val: `${metrics.wonCount} / ${euros(metrics.wonRev)}`,              bold: false, color: '#16a34a' },
-                  { label: 'On hold deals',                  val: `${metrics.onHoldCount} / ${euros(metrics.onHoldRev)}`,        bold: false, color: '#d97706' },
                   { label: 'Lost deals',                     val: `${metrics.lostCount} / ${euros(metrics.lostRev)}`,            bold: false, color: '#dc2626' },
                 ].map(row => (
                   <tr key={row.label}>
@@ -226,8 +244,8 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
                 ))}
                 <tr style={{ background: '#1e3a5f' }}>
                   <td style={{ fontWeight: 800, color: 'white' }}>TOTAL</td>
-                  <td className="r" style={{ fontWeight: 800, color: 'white' }}>{filtered.length}</td>
-                  <td className="r" style={{ fontWeight: 800, color: 'white' }}>{euros(metrics.totalRev)}</td>
+                  <td className="r" style={{ fontWeight: 800, color: 'white' }}>{metrics.openCount}</td>
+                  <td className="r" style={{ fontWeight: 800, color: 'white' }}>{euros(metrics.openRev)}</td>
                   <td className="r" style={{ fontWeight: 800, color: 'white' }}>100.0%</td>
                 </tr>
               </tbody>
@@ -245,7 +263,7 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
               <tbody>
                 {stageRows.map(row => (
                   <tr key={row.name}>
-                    <td style={{ color: row.status === 'won' ? '#16a34a' : row.status === 'lost' ? '#dc2626' : row.status === 'on_hold' ? '#d97706' : '#1e293b', fontWeight: ['won','lost','on_hold'].includes(row.status) ? 600 : 400 }}>
+                    <td style={{ color: row.status === 'on_hold' ? '#d97706' : '#1e293b', fontWeight: row.status === 'on_hold' ? 600 : 400 }}>
                       {row.name}
                     </td>
                     <td className="r" style={{ color: '#64748b' }}>{row.count}</td>
@@ -254,8 +272,8 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
                 ))}
                 <tr style={{ background: '#1e3a5f' }}>
                   <td style={{ fontWeight: 800, color: 'white' }}>TOTAL</td>
-                  <td className="r" style={{ fontWeight: 800, color: 'white' }}>{filtered.length}</td>
-                  <td className="r" style={{ fontWeight: 800, color: 'white' }}>{euros(metrics.totalRev)}</td>
+                  <td className="r" style={{ fontWeight: 800, color: 'white' }}>{metrics.openCount}</td>
+                  <td className="r" style={{ fontWeight: 800, color: 'white' }}>{euros(metrics.openRev)}</td>
                 </tr>
               </tbody>
             </table>
