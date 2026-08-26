@@ -10,6 +10,11 @@ function pct(n: number) { return `${n.toFixed(1)}%` }
 
 const BAR_PALETTE = ['#3b82f6','#8b5cf6','#06b6d4','#10b981','#f59e0b','#ec4899','#6366f1','#14b8a6']
 
+// Internal/test accounts that shouldn't count toward real pipeline or win figures.
+const EXCLUDED_COMPANIES_RAW = ['TensorX Limited', 'FAKE COMPANY TEST', 'ICT Services']
+const EXCLUDED_COMPANIES = EXCLUDED_COMPANIES_RAW.map(c => c.toLowerCase())
+const EXCLUDED_COMPANIES_LABEL = `Excludes: ${EXCLUDED_COMPANIES_RAW.join(', ')}`
+
 function stageColour(name: string, idx: number): string {
   const l = name.toLowerCase()
   if (l.includes('won') || l === 'win') return '#16a34a'
@@ -27,6 +32,13 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
 
   const [dateFrom, setDateFrom] = useState(toInputDate(new Date(year, 0, 1)))
   const [dateTo,   setDateTo]   = useState(toInputDate(new Date(year, 11, 31)))
+  const [excludeTestAccounts, setExcludeTestAccounts] = useState(true)
+
+  // Drop internal/test accounts before anything else derives from it, when the toggle is on.
+  const base = useMemo(() => {
+    if (!excludeTestAccounts) return all
+    return all.filter(o => !EXCLUDED_COMPANIES.includes((o.company || '').toLowerCase().trim()))
+  }, [all, excludeTestAccounts])
 
   // Quick-select helpers
   function setRange(from: Date, to: Date) {
@@ -44,21 +56,21 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
   // Current open pipeline — a live snapshot, deliberately NOT bound by the date range.
   // An open deal doesn't belong to a "period" until it closes, so it's always shown in full.
   const openPipeline = useMemo(
-    () => all.filter(o => o.normalised_status === 'pipeline' || o.normalised_status === 'on_hold'),
-    [all]
+    () => base.filter(o => o.normalised_status === 'pipeline' || o.normalised_status === 'on_hold'),
+    [base]
   )
 
   // Period activity — Won/Lost deals whose created_date falls inside the selected range.
   const periodClosed = useMemo(() => {
     const from = new Date(dateFrom)
     const to   = new Date(dateTo); to.setHours(23, 59, 59)
-    return all.filter(o => {
+    return base.filter(o => {
       if (o.normalised_status !== 'won' && o.normalised_status !== 'lost') return false
       const d = o.created_date ? new Date(o.created_date) : null
       if (!d) return false
       return d >= from && d <= to
     })
-  }, [all, dateFrom, dateTo])
+  }, [base, dateFrom, dateTo])
 
   const metrics = useMemo(() => {
     const pipeline = openPipeline.filter(o => o.normalised_status === 'pipeline')
@@ -167,6 +179,17 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
             <span style={{ color: 'rgba(255,255,255,.3)' }}>→</span>
             <input type="date" className="date-input" value={dateTo} onChange={e => setDateTo(e.target.value)} />
           </div>
+
+          <button onClick={() => setExcludeTestAccounts(v => !v)}
+            title={EXCLUDED_COMPANIES_LABEL}
+            style={{
+              padding: '6px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              border: excludeTestAccounts ? '1px solid #93c5fd' : '1px solid rgba(255,255,255,.25)',
+              background: excludeTestAccounts ? 'rgba(59,130,246,.35)' : 'rgba(255,255,255,.1)',
+              color: 'white',
+            }}>
+            {excludeTestAccounts ? '✓ ' : ''}Hide test accounts
+          </button>
 
           <button onClick={() => window.print()}
             style={{ padding: '6px 14px', border: '1px solid rgba(255,255,255,.25)', background: 'rgba(255,255,255,.1)', color: 'white', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
