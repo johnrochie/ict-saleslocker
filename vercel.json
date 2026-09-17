@@ -3,6 +3,10 @@
     {
       "path": "/api/autotask/sync",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/bullhorn/sync",
+      "schedule": "15 6 * * *"
     }
   ]
 }

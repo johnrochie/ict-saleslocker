@@ -69,6 +69,11 @@ const navItems: NavItem[] = [
     allowedRoles: ['admin', 'sales_manager'],
     icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>,
   },
+  {
+    label: 'Recruitment', href: '/dashboard/recruitment',
+    allowedRoles: ['admin', 'sales_manager'],
+    icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 100-8 4 4 0 000 8zm-9 8v-2a4 4 0 014-4h2" /></svg>,
+  },
 ]
 
 const amNavItem: NavItem = {
