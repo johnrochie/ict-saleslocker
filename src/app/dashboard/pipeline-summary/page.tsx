@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { fetchAllRows } from '@/lib/supabase/pagination'
+import { loadExclusions } from '@/lib/exclusions'
 import PipelineSummaryClient from './PipelineSummaryClient'
 
 export const revalidate = 0
@@ -25,5 +26,7 @@ export default async function PipelineSummaryPage() {
       .range(from, to)
   )
 
-  return <PipelineSummaryClient all={all} year={year} />
+  const { exclusions, canEdit, ready } = await loadExclusions(supabase)
+
+  return <PipelineSummaryClient all={all} year={year} exclusions={exclusions} canEdit={canEdit} exclusionsReady={ready} />
 }

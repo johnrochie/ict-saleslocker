@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { fetchAllRows } from '@/lib/supabase/pagination'
+import { loadExclusions } from '@/lib/exclusions'
 import ExecPackClient from './ExecPackClient'
 
 export const revalidate = 0
@@ -20,5 +21,7 @@ export default async function ExecPackPage() {
       .range(from, to)
   )
 
-  return <ExecPackClient all={all} year={year} />
+  const { exclusions, canEdit, ready } = await loadExclusions(supabase)
+
+  return <ExecPackClient all={all} year={year} exclusions={exclusions} canEdit={canEdit} exclusionsReady={ready} />
 }

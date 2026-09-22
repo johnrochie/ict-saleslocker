@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Opportunity } from '@/types'
+import type { DealExclusion } from '@/lib/exclusions'
+import { useDealExclusions, HideDealButton, HideDealDialog, HiddenDealsPanel, DealExclusionsState } from '@/components/dashboard/DealExclusions'
 
 // Builds the four exec-meeting slides (Pipeline, Pipeline Breakdown, General
 // Wins, Wins Breakdown) from one set of settings. The numbers follow the same
@@ -70,8 +72,11 @@ type Saved = {
   excludeTest: boolean; excludeTensorX: boolean; activityRange: 'year' | 'wins'
 }
 
-export default function ExecPackClient({ all, year }: { all: Opportunity[]; year: number }) {
+export default function ExecPackClient({ all, year, exclusions, canEdit, exclusionsReady }: {
+  all: Opportunity[]; year: number; exclusions: DealExclusion[]; canEdit: boolean; exclusionsReady: boolean
+}) {
   const today = new Date()
+  const hidden = useDealExclusions(exclusions)
 
   const [winsFrom,  setWinsFrom]  = useState(ymd(new Date(year, 0, 1)))
   const [winsTo,    setWinsTo]    = useState(ymd(new Date(year, 11, 31)))
@@ -113,11 +118,12 @@ export default function ExecPackClient({ all, year }: { all: Opportunity[]; year
   }, [loaded, winsFrom, winsTo, winsBasis, pipeCats, winCats, topN, excludeTest, excludeTensorX, activityRange])
 
   const base = useMemo(() => all.filter(o => {
+    if (hidden.hiddenIds.has(o.id)) return false
     const company = (o.company || '').toLowerCase().trim()
     if (excludeTest    && TEST_COMPANIES.includes(company))    return false
     if (excludeTensorX && TENSORX_COMPANIES.includes(company)) return false
     return true
-  }), [all, excludeTest, excludeTensorX])
+  }), [all, excludeTest, excludeTensorX, hidden.hiddenIds])
 
   // ── Pipeline (live snapshot, not date-bound) ──────────────────────────────
   const open     = useMemo(() => base.filter(o => o.normalised_status === 'pipeline' || o.normalised_status === 'on_hold'), [base])
@@ -186,7 +192,10 @@ export default function ExecPackClient({ all, year }: { all: Opportunity[]; year
     const node = slideRefs.current[i]
     if (!node) throw new Error('Slide not ready')
     const { toBlob } = await import('html-to-image')
-    const blob = await toBlob(node, { width: SLIDE_W, height: SLIDE_H, pixelRatio: 1.5, backgroundColor: '#f5f5f5', cacheBust: true })
+    const blob = await toBlob(node, {
+      width: SLIDE_W, height: SLIDE_H, pixelRatio: 1.5, backgroundColor: '#f5f5f5', cacheBust: true,
+      filter: n => !(n instanceof HTMLElement && n.classList.contains('xp-nocap')),   // drop the Hide buttons
+    })
     if (!blob) throw new Error('Could not render slide')
     return blob
   }
@@ -261,7 +270,7 @@ export default function ExecPackClient({ all, year }: { all: Opportunity[]; year
     </div>,
 
     // 2. Pipeline breakdown
-    <Breakdown key="pb" tables={pipeTables} mode="pipeline" empty="Pick at least one category above" />,
+    <Breakdown key="pb" tables={pipeTables} mode="pipeline" empty="Pick at least one category above" hide={canEdit ? hidden : null} />,
 
     // 3. General wins
     <div key="w" className="xp-grid">
@@ -278,7 +287,7 @@ export default function ExecPackClient({ all, year }: { all: Opportunity[]; year
     </div>,
 
     // 4. Wins breakdown
-    <Breakdown key="wb" tables={winTables} mode="won" empty="Pick at least one category above" />,
+    <Breakdown key="wb" tables={winTables} mode="won" empty="Pick at least one category above" hide={canEdit ? hidden : null} />,
   ]
 
   const btn = 'px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors'
@@ -334,6 +343,11 @@ export default function ExecPackClient({ all, year }: { all: Opportunity[]; year
         </div>
       </div>
 
+      <div className="mb-6"><HiddenDealsPanel state={hidden} canEdit={canEdit} ready={exclusionsReady} scope={s => s !== 'lost'} /></div>
+      {canEdit && exclusionsReady && (
+        <p className="text-xs text-gray-500 -mt-3 mb-4">Spotted a deal that shouldn&apos;t be there? Hover over it in a breakdown slide and click <strong>Hide</strong>. The totals update straight away.</p>
+      )}
+
       {/* Slides */}
       <div ref={wrapRef} className="space-y-8">
         {slides.map((content, i) => (
@@ -360,6 +374,8 @@ export default function ExecPackClient({ all, year }: { all: Opportunity[]; year
           </div>
         ))}
       </div>
+
+      <HideDealDialog state={hidden} />
 
       {toast && (
         <div className="fixed bottom-6 right-6 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg z-50">{toast}</div>
@@ -470,7 +486,7 @@ function Bars({ rows, empty }: { rows: Row[]; empty: string }) {
   )
 }
 
-function DealTable({ cat, deals, mode }: { cat: string; deals: Opportunity[]; mode: 'pipeline' | 'won' }) {
+function DealTable({ cat, deals, mode, hide }: { cat: string; deals: Opportunity[]; mode: 'pipeline' | 'won'; hide: DealExclusionsState | null }) {
   return (
     <div className="xp-panel">
       <PanelHead title={`Top ${deals.length} — ${cat} (${mode === 'won' ? 'Won' : 'Open Pipeline'})`} />
@@ -487,7 +503,10 @@ function DealTable({ cat, deals, mode }: { cat: string; deals: Opportunity[]; mo
                   ? (o.closed_date ? fmtDate(o.closed_date) : '—')
                   : (o.normalised_status === 'on_hold' ? 'On Hold' : (o.stage || 'Unknown'))}
               </td>
-              <td className="r" style={{ fontWeight: 700, color: mode === 'won' ? '#16a34a' : undefined, whiteSpace: 'nowrap' }}>{euros(o.revenue_total)}</td>
+              <td className="r" style={{ fontWeight: 700, color: mode === 'won' ? '#16a34a' : undefined, whiteSpace: 'nowrap' }}>
+                {euros(o.revenue_total)}
+                {hide && <span className="xp-nocap"><HideDealButton deal={o} state={hide} /></span>}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -497,9 +516,9 @@ function DealTable({ cat, deals, mode }: { cat: string; deals: Opportunity[]; mo
 }
 
 // Two columns, each table dropped into whichever column is currently shorter.
-function Breakdown({ tables, mode, empty }: { tables: { cat: string; deals: Opportunity[] }[]; mode: 'pipeline' | 'won'; empty: string }) {
+function Breakdown({ tables, mode, empty, hide }: { tables: { cat: string; deals: Opportunity[] }[]; mode: 'pipeline' | 'won'; empty: string; hide: DealExclusionsState | null }) {
   if (tables.length === 0) return <p className="xp-empty" style={{ paddingTop: 200 }}>{empty}</p>
-  if (tables.length === 1) return <div style={{ maxWidth: 1100 }}><DealTable {...tables[0]} mode={mode} /></div>
+  if (tables.length === 1) return <div style={{ maxWidth: 1100 }}><DealTable {...tables[0]} mode={mode} hide={hide} /></div>
   const cols: { items: typeof tables; weight: number }[] = [{ items: [], weight: 0 }, { items: [], weight: 0 }]
   tables.forEach(t => {
     const target = cols[0].weight <= cols[1].weight ? cols[0] : cols[1]
@@ -507,7 +526,7 @@ function Breakdown({ tables, mode, empty }: { tables: { cat: string; deals: Oppo
   })
   return (
     <div className="xp-cols">
-      {cols.map((c, i) => <div key={i} className="xp-col">{c.items.map(t => <DealTable key={t.cat} {...t} mode={mode} />)}</div>)}
+      {cols.map((c, i) => <div key={i} className="xp-col">{c.items.map(t => <DealTable key={t.cat} {...t} mode={mode} hide={hide} />)}</div>)}
     </div>
   )
 }
@@ -539,5 +558,7 @@ const SLIDE_CSS = `
   .xp-bar-track { flex: 1; height: 22px; background: #f1f5f9; border-radius: 4px; overflow: hidden; }
   .xp-bar-track > div { height: 100%; border-radius: 4px; min-width: 4px; }
   .xp-bar-val { width: 100px; font-size: 13px; font-weight: 700; text-align: right; flex-shrink: 0; }
+  .xp-nocap { display: none; margin-left: 8px; }
+  .xp-table tr:hover .xp-nocap { display: inline; }
   .xp-empty { text-align: center; color: #94a3b8; font-size: 15px; padding: 24px 0; }
 `

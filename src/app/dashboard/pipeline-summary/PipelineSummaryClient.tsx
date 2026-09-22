@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from 'react'
 import { Opportunity } from '@/types'
+import type { DealExclusion } from '@/lib/exclusions'
+import { useDealExclusions, HideDealButton, HideDealDialog, HiddenDealsPanel } from '@/components/dashboard/DealExclusions'
 
 function euros(n: number) {
   return new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
@@ -39,8 +41,11 @@ function toInputDate(d: Date) {
   return d.toISOString().split('T')[0]
 }
 
-export default function PipelineSummaryClient({ all, year }: { all: Opportunity[]; year: number }) {
+export default function PipelineSummaryClient({ all, year, exclusions, canEdit, exclusionsReady }: {
+  all: Opportunity[]; year: number; exclusions: DealExclusion[]; canEdit: boolean; exclusionsReady: boolean
+}) {
   const today = new Date()
+  const hidden = useDealExclusions(exclusions)
 
   const [dateFrom, setDateFrom] = useState(toInputDate(new Date(year, 0, 1)))
   const [dateTo,   setDateTo]   = useState(toInputDate(new Date(year, 11, 31)))
@@ -51,12 +56,13 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
   // Drop internal/test accounts and/or TensorX before anything else derives from it.
   const base = useMemo(() => {
     return all.filter(o => {
+      if (hidden.hiddenIds.has(o.id)) return false   // manager-hidden from exec reporting
       const company = (o.company || '').toLowerCase().trim()
       if (excludeTestAccounts && TEST_COMPANIES.includes(company))    return false
       if (excludeTensorX      && TENSORX_COMPANIES.includes(company)) return false
       return true
     })
-  }, [all, excludeTestAccounts, excludeTensorX])
+  }, [all, excludeTestAccounts, excludeTensorX, hidden.hiddenIds])
 
   // Quick-select helpers
   function setRange(from: Date, to: Date) {
@@ -243,6 +249,7 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
       </div>
 
       <div className="ps-wrap" style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 28px' }}>
+        <div style={{ marginBottom: 16 }}><HiddenDealsPanel state={hidden} canEdit={canEdit} ready={exclusionsReady} scope={s => s === 'pipeline' || s === 'on_hold'} /></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
 
           {/* KEY METRICS */}
@@ -371,6 +378,8 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
         ICT Services &nbsp;·&nbsp; {dateStr} &nbsp;·&nbsp; Confidential — internal use only
       </div>
 
+      <HideDealDialog state={hidden} />
+
       {/* CATEGORY DRILL-DOWN MODAL */}
       {selectedCat && (
         <div className="no-print" onClick={() => setSelectedCat(null)}
@@ -384,7 +393,7 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
             </div>
             <div style={{ overflowY: 'auto' }}>
               <table className="ps-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr><th>#</th><th>Company</th><th>Deal</th><th>Stage</th><th className="r">Value</th></tr></thead>
+                <thead><tr><th>#</th><th>Company</th><th>Deal</th><th>Stage</th><th className="r">Value</th>{canEdit && exclusionsReady && <th />}</tr></thead>
                 <tbody>
                   {topCatDeals.map((o, i) => (
                     <tr key={o.id}>
@@ -395,10 +404,11 @@ export default function PipelineSummaryClient({ all, year }: { all: Opportunity[
                         {o.normalised_status === 'on_hold' ? 'On Hold' : (o.stage || 'Unknown')}
                       </td>
                       <td className="r" style={{ fontWeight: 700 }}>{euros(o.revenue_total)}</td>
+                      {canEdit && exclusionsReady && <td className="r"><HideDealButton deal={o} state={hidden} /></td>}
                     </tr>
                   ))}
                   {topCatDeals.length === 0 && (
-                    <tr><td colSpan={5} style={{ textAlign: 'center', color: '#94a3b8', padding: 20 }}>No deals found</td></tr>
+                    <tr><td colSpan={6} style={{ textAlign: 'center', color: '#94a3b8', padding: 20 }}>No deals found</td></tr>
                   )}
                 </tbody>
               </table>
