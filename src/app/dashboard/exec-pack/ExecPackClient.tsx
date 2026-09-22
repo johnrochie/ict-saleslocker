@@ -36,6 +36,10 @@ function effectiveCategory(o: Opportunity): string {
   return o.category || 'Uncategorised'
 }
 
+function stageKey(o: Opportunity): string {
+  return o.normalised_status === 'on_hold' ? 'On Hold' : (o.stage || 'Unknown')
+}
+
 function stageColour(name: string, idx: number): string {
   const l = name.toLowerCase()
   if (l.includes('won') || l === 'win') return '#16a34a'
@@ -70,6 +74,7 @@ type Saved = {
   winsFrom: string; winsTo: string; winsBasis: 'created' | 'closed'
   pipeCats: string[] | null; winCats: string[] | null; topN: number
   excludeTest: boolean; excludeTensorX: boolean; activityRange: 'year' | 'wins'
+  hiddenStages: string[]
 }
 
 export default function ExecPackClient({ all, year, exclusions, canEdit, exclusionsReady }: {
@@ -82,6 +87,9 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
   const [winsTo,    setWinsTo]    = useState(ymd(new Date(year, 11, 31)))
   const [winsBasis, setWinsBasis] = useState<'created' | 'closed'>('created')
   const [activityRange, setActivityRange] = useState<'year' | 'wins'>('year')
+  // Stages left out of the pipeline slides. Stored as exclusions so a new
+  // stage in Autotask shows up by default rather than silently disappearing.
+  const [hiddenStages, setHiddenStages] = useState<string[]>([])
   const [pipeCats,  setPipeCats]  = useState<string[] | null>(null)  // null = auto (top 3)
   const [winCats,   setWinCats]   = useState<string[] | null>(null)  // null = auto (top 2)
   const [topN,      setTopN]      = useState(10)
@@ -101,6 +109,7 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
         if (s.winsTo)    setWinsTo(s.winsTo)
         if (s.winsBasis) setWinsBasis(s.winsBasis)
         if (s.activityRange) setActivityRange(s.activityRange)
+        if (Array.isArray(s.hiddenStages)) setHiddenStages(s.hiddenStages)
         if (s.pipeCats !== undefined) setPipeCats(s.pipeCats)
         if (s.winCats  !== undefined) setWinCats(s.winCats)
         if (s.topN)      setTopN(s.topN)
@@ -113,9 +122,9 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
 
   useEffect(() => {
     if (!loaded) return
-    const s: Saved = { winsFrom, winsTo, winsBasis, pipeCats, winCats, topN, excludeTest, excludeTensorX, activityRange }
+    const s: Saved = { winsFrom, winsTo, winsBasis, pipeCats, winCats, topN, excludeTest, excludeTensorX, activityRange, hiddenStages }
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)) } catch { /* ignore */ }
-  }, [loaded, winsFrom, winsTo, winsBasis, pipeCats, winCats, topN, excludeTest, excludeTensorX, activityRange])
+  }, [loaded, winsFrom, winsTo, winsBasis, pipeCats, winCats, topN, excludeTest, excludeTensorX, activityRange, hiddenStages])
 
   const base = useMemo(() => all.filter(o => {
     if (hidden.hiddenIds.has(o.id)) return false
@@ -126,13 +135,16 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
   }), [all, excludeTest, excludeTensorX, hidden.hiddenIds])
 
   // ── Pipeline (live snapshot, not date-bound) ──────────────────────────────
-  const open     = useMemo(() => base.filter(o => o.normalised_status === 'pipeline' || o.normalised_status === 'on_hold'), [base])
+  const openAll  = useMemo(() => base.filter(o => o.normalised_status === 'pipeline' || o.normalised_status === 'on_hold'), [base])
+  const allStageRows = useMemo(() => groupBy(openAll, stageKey), [openAll])
+  const open     = useMemo(() => openAll.filter(o => !hiddenStages.includes(stageKey(o))), [openAll, hiddenStages])
+  const stagesOff = hiddenStages.filter(st => allStageRows.some(r => r.name === st))
   const active   = useMemo(() => open.filter(o => o.normalised_status === 'pipeline'), [open])
   const onHold   = useMemo(() => open.filter(o => o.normalised_status === 'on_hold'), [open])
   const openRev  = sum(open)
   const pipeCatRows   = useMemo(() => groupBy(open, effectiveCategory), [open])
   const pipeStageRows = useMemo(() => {
-    const rows = groupBy(open, o => o.normalised_status === 'on_hold' ? 'On Hold' : (o.stage || 'Unknown'))
+    const rows = groupBy(open, stageKey)
     return [...rows.filter(r => r.name !== 'On Hold'), ...rows.filter(r => r.name === 'On Hold')]
   }, [open])
 
@@ -250,7 +262,7 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
   const slides = [
     // 1. Pipeline
     <div key="p" className="xp-grid">
-      <Panel title="Current Open Pipeline" right="as of today">
+      <Panel title="Current Open Pipeline" right={stagesOff.length ? `as of today · ${stagesOff.length} stage${stagesOff.length === 1 ? '' : 's'} excluded` : 'as of today'}>
         <KV rows={[
           ['Total open opportunities', open.length.toLocaleString('en-IE')],
           ['Total open pipeline value', euros(openRev), { bold: true }],
@@ -326,6 +338,18 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
           <button className={`${btn} ${winsBasis === 'closed'  ? on : off}`} onClick={() => setWinsBasis('closed')}>Closed date</button>
         </div>
 
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="w-36 font-semibold text-gray-700">Pipeline stages</span>
+          <button className={`${btn} ${stagesOff.length === 0 ? on : off}`} onClick={() => setHiddenStages([])}>All</button>
+          {allStageRows.map(r => (
+            <button key={r.name} className={`${btn} ${hiddenStages.includes(r.name) ? off : on}`}
+              onClick={() => setHiddenStages(h => h.includes(r.name) ? h.filter(n => n !== r.name) : [...h, r.name])}>
+              {r.name} <span className="opacity-60">({r.count})</span>
+            </button>
+          ))}
+          {stagesOff.length > 0 && <span className="text-xs text-gray-500">Applies to both pipeline slides — noted on the slide.</span>}
+        </div>
+
         <CatPicker label="Pipeline breakdown" rows={pipeCatRows} selected={pipeSel}
           onToggle={n => toggle(pipeSel, n, setPipeCats)} onAuto={() => setPipeCats(null)} auto={pipeCats === null} btn={btn} on={on} off={off} />
         <CatPicker label="Wins breakdown" rows={winCatRows} selected={winSel}
@@ -367,6 +391,7 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
                     <img src="/logo.png" alt="ICT Services" />
                   </div>
                   <div className="xp-body">{content}</div>
+                  {i < 2 && stagesOff.length > 0 && <div className="xp-note">Excludes stage{stagesOff.length === 1 ? '' : 's'}: {stagesOff.join(', ')}</div>}
                   <div className="xp-foot">Source: ICT SalesIQ · {today.toLocaleDateString('en-IE', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
                 </div>
               </div>
@@ -537,6 +562,7 @@ const SLIDE_CSS = `
   .xp-title h2 { margin: 0; font-size: 46px; font-weight: 800; color: #333; letter-spacing: -.5px; }
   .xp-title img { height: 66px; }
   .xp-body { flex: 1; padding: 0 56px; min-height: 0; }
+  .xp-note { position: absolute; bottom: 12px; left: 56px; font-size: 13px; color: #b45309; font-weight: 600; }
   .xp-foot { position: absolute; bottom: 12px; right: 56px; font-size: 11px; color: #94a3b8; }
   .xp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
   .xp-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
