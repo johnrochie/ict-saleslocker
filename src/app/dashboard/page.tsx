@@ -104,6 +104,20 @@ export default async function DashboardPage({
     return acc + (r.revenue_total ?? 0) * (weightMap[r.stage ?? ''] ?? 0)
   }, 0)
 
+  // Open deals whose stage has no stage_weights row count at 0% above, so a
+  // renamed or new Autotask stage silently shrinks the weighted figure.
+  const unweightedStages: Record<string, { count: number; revenue: number }> = {}
+  pipeline.forEach((r) => {
+    const stage = r.stage ?? '(no stage)'
+    if (r.stage != null && r.stage in weightMap) return
+    unweightedStages[stage] ??= { count: 0, revenue: 0 }
+    unweightedStages[stage].count += 1
+    unweightedStages[stage].revenue += r.revenue_total ?? 0
+  })
+  const unweightedList = Object.entries(unweightedStages)
+    .map(([stage, v]) => ({ stage, ...v }))
+    .sort((a, b) => b.revenue - a.revenue)
+
   // Category breakdown (pipeline)
   const categoryMap: Record<string, { revenue: number; count: number; gp: number }> = {}
   pipeline.forEach((r) => {
@@ -182,6 +196,19 @@ export default async function DashboardPage({
         </div>
         <YearFilter years={years} selected={selectedYear} />
       </div>
+
+      {unweightedList.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-medium">
+            Weighted Pipeline is understated: {unweightedList.reduce((n, s) => n + s.count, 0)} open deals
+            ({formatCompact(unweightedList.reduce((n, s) => n + s.revenue, 0))}) are in stages with no weight set.
+          </p>
+          <p className="mt-1">
+            {unweightedList.map((s) => `${s.stage} (${s.count} · ${formatCompact(s.revenue)})`).join(', ')}
+            {' — '}add these to the stage_weights table.
+          </p>
+        </div>
+      )}
 
       {/* Key Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
