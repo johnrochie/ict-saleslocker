@@ -15,6 +15,10 @@ function dealMatchesRep(deal: { account_manager: string | null; opportunity_owne
   if (rep === 'all') return true
   return (deal.account_manager || '') === rep || (deal.opportunity_owner || '') === rep
 }
+// Autotask has this customer under both "TensorX Limited" and "Tensorix Limited".
+function isTensorX(company: string | null | undefined): boolean {
+  return /tensor(x|ix)/i.test(company || '')
+}
 function mondayOf(date: Date): Date {
   const dow = date.getDay()
   const toMon = dow === 0 ? -6 : 1 - dow
@@ -211,6 +215,7 @@ export default function WeeklyReportClient() {
   const [repOrder, setRepOrder]       = useState<string[]>(SALES_TEAM_KEYS)
   const [dragIdx, setDragIdx]         = useState<number | null>(null)
   const [weekOffset, setWeekOffset]   = useState(0)
+  const [excludeTensorX, setExcludeTensorX] = useState(false)
 
   const loadData = useCallback(async (offset: number) => {
     setLoading(true)
@@ -284,8 +289,9 @@ export default function WeeklyReportClient() {
     return <div className="flex items-center justify-center py-20"><p className="text-sm text-gray-400">Loading weekly data...</p></div>
   }
 
-  const filterDeal    = (d: Deal)    => dealMatchesRep(d, selectedRep)
-  const filterMeeting = (m: Meeting) => selectedRep === 'all' || m.assigned_to === selectedRep
+  const filterDeal    = (d: Deal)    => dealMatchesRep(d, selectedRep) && !(excludeTensorX && isTensorX(d.company))
+  const filterMeeting = (m: Meeting) =>
+    (selectedRep === 'all' || m.assigned_to === selectedRep) && !(excludeTensorX && isTensorX(m.company))
   const closedDeals      = data.closedDeals.filter(filterDeal)
   const closingDeals     = data.closingDeals.filter(filterDeal)
   const newEngagements   = data.newEngagements.filter(filterDeal)
@@ -354,6 +360,11 @@ export default function WeeklyReportClient() {
             {repDisplay(rep)}
           </button>
         ))}
+        <label className="ml-auto flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+          <input type="checkbox" checked={excludeTensorX} onChange={e => setExcludeTensorX(e.target.checked)}
+            className="rounded border-gray-300" />
+          Exclude TensorX
+        </label>
       </div>
 
       {/* Meetings sync automatically from Autotask (CompanyToDos + CompanyNotes).
