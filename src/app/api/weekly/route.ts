@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
-import { SALES_TEAM_KEYS, isSalesTeamDeal, weekBounds } from '@/lib/config'
+import { RETAIL_REP_KEYS, isSalesTeamDeal, weekBounds } from '@/lib/config'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
 
   const [
     { data: closedDeals },
+    { data: closedPortalDeals },
     { data: closingDeals },
     { data: newEngagements },
     { data: lastWeekMeetings },
@@ -24,6 +25,13 @@ export async function GET(request: NextRequest) {
       .eq('normalised_status', 'won')
       .gte('closed_date', lastWeek.from).lte('closed_date', lastWeek.to)
       .order('revenue_total', { ascending: false }),
+    // Closed Portal/OGP deals are classed 'portal' and kept out of the query above.
+    // Fetched separately so the page can show or hide them (see filter below).
+    admin.from('opportunities')
+      .select('company, opportunity_name, account_manager, opportunity_owner, revenue_total, gross_profit, gross_margin_pct, category, stage, closed_date')
+      .eq('normalised_status', 'portal')
+      .in('status', ['Closed', 'Implemented'])
+      .gte('closed_date', lastWeek.from).lte('closed_date', lastWeek.to),
     admin.from('opportunities')
       .select('company, opportunity_name, account_manager, opportunity_owner, revenue_total, gross_profit, gross_margin_pct, category, stage, projected_close_date')
       .eq('normalised_status', 'pipeline')
@@ -44,10 +52,20 @@ export async function GET(request: NextRequest) {
       .order('start_date', { ascending: true }),
   ])
 
+  // Portal/OGP deals count only when a sales rep is on them. Retail reps'
+  // deals (Desmond/Ganly) stay out of this report entirely.
+  const portalClosed = (closedPortalDeals || [])
+    .filter(d =>
+      isSalesTeamDeal(d.account_manager, d.opportunity_owner) &&
+      !RETAIL_REP_KEYS.includes(d.account_manager || '') &&
+      !RETAIL_REP_KEYS.includes(d.opportunity_owner || ''))
+    .map(d => ({ ...d, is_portal: true }))
+
   return NextResponse.json({
     lastWeek,
     thisWeek,
-    closedDeals:      (closedDeals      || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner)),
+    closedDeals:      [...(closedDeals || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner)), ...portalClosed]
+                        .sort((a, b) => (b.revenue_total ?? 0) - (a.revenue_total ?? 0)),
     closingDeals:     (closingDeals     || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner)),
     newEngagements:   (newEngagements   || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner)),
     lastWeekMeetings: lastWeekMeetings  || [],

@@ -180,8 +180,11 @@ export function transformOpportunity(
     //   1. closedDate — authoritative (populated by Autotask when deal is won)
     //   2. projectedCloseDate — approximation; better than null, keeps deal visible
     //   3. undefined — never overwrite an existing DB value with null
+    // Closed portal/OGP deals get a date too: the Weekly report can optionally
+    // include the ones a sales rep worked, and has to place them in a week.
     closed_date: (() => {
-      if (normalisedStatus !== 'won') return undefined
+      const closedPortal = normalisedStatus === 'portal' && (statusLabel === 'Closed' || statusLabel === 'Implemented')
+      if (normalisedStatus !== 'won' && !closedPortal) return undefined
       const closedDate =
         (raw.closedDate as string | null) ??
         (raw.closeDate  as string | null)

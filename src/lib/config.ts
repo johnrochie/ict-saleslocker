@@ -14,12 +14,16 @@ export const SALES_TEAM: SalesRepConfig[] = [
   { key: 'Maciejska, Barbara', first: 'Barbara', display: 'Barbara Maciejska' },
   { key: 'Conboy, John',       first: 'John C',  display: 'John Conboy'       },
   { key: 'Dowdall, James',     first: 'James D', display: 'James Dowdall'     },
+  { key: "O'Brien, Gary",      first: 'Gary',    display: 'Gary O\'Brien'     },
   { key: "O'Hora, Evan",       first: 'Evan',    display: 'Evan O\'Hora'      },
   { key: 'Roche, John',        first: 'JR',      display: 'John Roche'        },
   { key: 'Taylor, Jamie',      first: 'Jamie',   display: 'Jamie Taylor'      },
 ]
 
 export const SALES_TEAM_KEYS = SALES_TEAM.map(r => r.key)
+
+/** Retail reps — their deals are classed 'portal' and kept out of sales reporting. */
+export const RETAIL_REP_KEYS = ['Desmond, Tom', 'Ganly, Peter']
 
 /** Returns true if the deal belongs to a member of the sales team */
 export function isSalesTeamDeal(

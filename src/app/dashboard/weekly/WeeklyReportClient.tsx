@@ -9,7 +9,9 @@ function repDisplay(name: string): string {
   return name.includes(',') ? name.split(',').map(s => s.trim()).reverse().join(' ') : name
 }
 function repDisplayFromDeal(am: string | null, oo: string | null): string {
-  return repDisplay(am || oo || 'Unknown')
+  // Portal/OGP deals have "Portal, OGP" as account manager; show the sales rep on them instead.
+  const rep = SALES_TEAM_KEYS.includes(am || '') ? am : SALES_TEAM_KEYS.includes(oo || '') ? oo : (am || oo)
+  return repDisplay(rep || 'Unknown')
 }
 function dealMatchesRep(deal: { account_manager: string | null; opportunity_owner: string | null }, rep: string): boolean {
   if (rep === 'all') return true
@@ -41,6 +43,7 @@ interface Deal {
   revenue_total: number; gross_profit: number; gross_margin_pct: number
   category: string | null; stage: string | null
   closed_date?: string | null; projected_close_date?: string | null; created_date?: string | null
+  is_portal?: boolean  // Portal/OGP deal a sales rep worked (closed deals only)
 }
 interface Meeting {
   classification: string | null; company: string; action_type: string | null
@@ -99,7 +102,12 @@ function DealTable({ deals, dateField, dateLabel, showRep }: {
             {highlight.map((d, i) => (
               <tr key={i} className="hover:bg-gray-50">
                 <td className="py-2 font-medium text-gray-900 max-w-[140px]"><span className="truncate block">{d.company}</span></td>
-                <td className="py-2 text-gray-600 max-w-[200px]"><span className="truncate block">{d.opportunity_name}</span></td>
+                <td className="py-2 text-gray-600 max-w-[200px]">
+                  <span className="truncate block">
+                    {d.opportunity_name}
+                    {d.is_portal && <span className="ml-1.5 text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded px-1 py-px align-middle">OGP</span>}
+                  </span>
+                </td>
                 {showRep && <td className="py-2 text-gray-500 whitespace-nowrap">{repDisplayFromDeal(d.account_manager, d.opportunity_owner)}</td>}
                 <td className="py-2 text-right font-semibold text-gray-900 whitespace-nowrap">{formatCompact(d.revenue_total)}</td>
                 <td className="py-2 text-right text-gray-600 whitespace-nowrap">{formatPercent(d.gross_margin_pct, 1)}</td>
@@ -216,6 +224,7 @@ export default function WeeklyReportClient() {
   const [dragIdx, setDragIdx]         = useState<number | null>(null)
   const [weekOffset, setWeekOffset]   = useState(0)
   const [excludeTensorX, setExcludeTensorX] = useState(false)
+  const [includePortal, setIncludePortal]   = useState(true)
 
   const loadData = useCallback(async (offset: number) => {
     setLoading(true)
@@ -289,7 +298,8 @@ export default function WeeklyReportClient() {
     return <div className="flex items-center justify-center py-20"><p className="text-sm text-gray-400">Loading weekly data...</p></div>
   }
 
-  const filterDeal    = (d: Deal)    => dealMatchesRep(d, selectedRep) && !(excludeTensorX && isTensorX(d.company))
+  const filterDeal    = (d: Deal)    =>
+    dealMatchesRep(d, selectedRep) && !(excludeTensorX && isTensorX(d.company)) && (includePortal || !d.is_portal)
   const filterMeeting = (m: Meeting) =>
     (selectedRep === 'all' || m.assigned_to === selectedRep) && !(excludeTensorX && isTensorX(m.company))
   const closedDeals      = data.closedDeals.filter(filterDeal)
@@ -360,11 +370,19 @@ export default function WeeklyReportClient() {
             {repDisplay(rep)}
           </button>
         ))}
-        <label className="ml-auto flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
-          <input type="checkbox" checked={excludeTensorX} onChange={e => setExcludeTensorX(e.target.checked)}
-            className="rounded border-gray-300" />
-          Exclude TensorX
-        </label>
+        <div className="ml-auto flex items-center gap-4">
+          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none"
+            title="Closed Portal/OGP deals that a sales rep worked. Retail deals are never included.">
+            <input type="checkbox" checked={includePortal} onChange={e => setIncludePortal(e.target.checked)}
+              className="rounded border-gray-300" />
+            Include Portal/OGP deals
+          </label>
+          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+            <input type="checkbox" checked={excludeTensorX} onChange={e => setExcludeTensorX(e.target.checked)}
+              className="rounded border-gray-300" />
+            Exclude TensorX
+          </label>
+        </div>
       </div>
 
       {/* Meetings sync automatically from Autotask (CompanyToDos + CompanyNotes).
