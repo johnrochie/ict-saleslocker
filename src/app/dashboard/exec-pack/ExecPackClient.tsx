@@ -29,7 +29,7 @@ const TENSORX_COMPANIES = ['tensorx limited']
 const SLIDE_W = 1600
 const SLIDE_H = 900
 const MAX_CAT_ROWS = 10
-const STORAGE_KEY = 'execPack.v1'
+const STORAGE_KEY = 'execPack.v2'   // v2: wins default to closed date, portal deals included
 
 function effectiveCategory(o: Opportunity): string {
   if (o.normalised_status === 'on_hold') return 'On Hold'
@@ -73,7 +73,7 @@ function sum(deals: Opportunity[]) { return deals.reduce((s, o) => s + o.revenue
 type Saved = {
   winsFrom: string; winsTo: string; winsBasis: 'created' | 'closed'
   pipeCats: string[] | null; winCats: string[] | null; topN: number
-  excludeTest: boolean; excludeTensorX: boolean; activityRange: 'year' | 'wins'
+  excludeTest: boolean; excludeTensorX: boolean; includePortal: boolean; activityRange: 'year' | 'wins'
   hiddenStages: string[]
 }
 
@@ -85,7 +85,7 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
 
   const [winsFrom,  setWinsFrom]  = useState(ymd(new Date(year, 0, 1)))
   const [winsTo,    setWinsTo]    = useState(ymd(new Date(year, 11, 31)))
-  const [winsBasis, setWinsBasis] = useState<'created' | 'closed'>('created')
+  const [winsBasis, setWinsBasis] = useState<'created' | 'closed'>('closed')
   const [activityRange, setActivityRange] = useState<'year' | 'wins'>('year')
   // Stages left out of the pipeline slides. Stored as exclusions so a new
   // stage in Autotask shows up by default rather than silently disappearing.
@@ -95,6 +95,7 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
   const [topN,      setTopN]      = useState(10)
   const [excludeTest,    setExcludeTest]    = useState(true)
   const [excludeTensorX, setExcludeTensorX] = useState(true)
+  const [includePortal,  setIncludePortal]  = useState(true)
   const [loaded, setLoaded] = useState(false)
   const [busy,   setBusy]   = useState<string | null>(null)
   const [toast,  setToast]  = useState<string | null>(null)
@@ -115,6 +116,7 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
         if (s.topN)      setTopN(s.topN)
         if (s.excludeTest    !== undefined) setExcludeTest(s.excludeTest)
         if (s.excludeTensorX !== undefined) setExcludeTensorX(s.excludeTensorX)
+        if (s.includePortal  !== undefined) setIncludePortal(s.includePortal)
       }
     } catch { /* storage unavailable — defaults are fine */ }
     setLoaded(true)
@@ -122,9 +124,9 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
 
   useEffect(() => {
     if (!loaded) return
-    const s: Saved = { winsFrom, winsTo, winsBasis, pipeCats, winCats, topN, excludeTest, excludeTensorX, activityRange, hiddenStages }
+    const s: Saved = { winsFrom, winsTo, winsBasis, pipeCats, winCats, topN, excludeTest, excludeTensorX, includePortal, activityRange, hiddenStages }
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)) } catch { /* ignore */ }
-  }, [loaded, winsFrom, winsTo, winsBasis, pipeCats, winCats, topN, excludeTest, excludeTensorX, activityRange, hiddenStages])
+  }, [loaded, winsFrom, winsTo, winsBasis, pipeCats, winCats, topN, excludeTest, excludeTensorX, includePortal, activityRange, hiddenStages])
 
   const base = useMemo(() => all.filter(o => {
     if (hidden.hiddenIds.has(o.id)) return false
@@ -149,13 +151,15 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
   }, [open])
 
   // ── Wins (date-bound) ─────────────────────────────────────────────────────
+  // Portal/OGP rows only reach this component when a sales rep worked them.
+  const isWin = (o: Opportunity) => o.normalised_status === 'won' || (includePortal && o.normalised_status === 'portal')
   const won = useMemo(() => base.filter(o => {
-    if (o.normalised_status !== 'won') return false
+    if (!isWin(o)) return false
     const d = winsBasis === 'closed' ? o.closed_date : o.created_date
     if (!d) return false
     const day = d.slice(0, 10)
     return day >= winsFrom && day <= winsTo
-  }), [base, winsFrom, winsTo, winsBasis])
+  }), [base, winsFrom, winsTo, winsBasis, includePortal])  // eslint-disable-line react-hooks/exhaustive-deps
   const wonRev       = sum(won)
   const winCatRows   = useMemo(() => groupBy(won, o => o.category || 'Uncategorised'), [won])
   const winStageRows = useMemo(() => groupBy(won, o => o.stage || 'Unknown'), [won])
@@ -168,7 +172,7 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
     const d = winsBasis === 'closed' ? o.closed_date : o.created_date
     return !!d && d.slice(0, 10) >= actFrom && d.slice(0, 10) <= actTo
   }
-  const actWon  = useMemo(() => base.filter(o => o.normalised_status === 'won'  && inActivity(o)), [base, actFrom, actTo, winsBasis]) // eslint-disable-line react-hooks/exhaustive-deps
+  const actWon  = useMemo(() => base.filter(o => isWin(o) && inActivity(o)), [base, actFrom, actTo, winsBasis, includePortal]) // eslint-disable-line react-hooks/exhaustive-deps
   const actLost = useMemo(() => base.filter(o => o.normalised_status === 'lost' && inActivity(o)), [base, actFrom, actTo, winsBasis]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Breakdown selections ──────────────────────────────────────────────────
@@ -364,6 +368,7 @@ export default function ExecPackClient({ all, year, exclusions, canEdit, exclusi
           <button className={`${btn} ${activityRange === 'wins' ? on : off}`} onClick={() => setActivityRange('wins')}>Same as wins period</button>
           <button className={`${btn} ${excludeTest ? on : off}`} onClick={() => setExcludeTest(v => !v)}>{excludeTest ? '✓ ' : ''}Hide test accounts</button>
           <button className={`${btn} ${excludeTensorX ? on : off}`} onClick={() => setExcludeTensorX(v => !v)}>{excludeTensorX ? '✓ ' : ''}Hide TensorX</button>
+          <button className={`${btn} ${includePortal ? on : off}`} onClick={() => setIncludePortal(v => !v)} title="Closed Portal/OGP deals a sales rep worked. Retail is never included.">{includePortal ? '✓ ' : ''}Include Portal/OGP wins</button>
         </div>
       </div>
 
