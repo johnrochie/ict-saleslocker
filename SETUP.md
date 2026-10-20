@@ -26,6 +26,9 @@
 4. Paste the entire contents into the SQL editor
 5. Click **Run** — you should see "Success. No rows returned"
 6. Verify in **Table Editor** that you can see: `opportunities`, `profiles`, `import_logs`, `stage_weights`
+7. Run the rest of `supabase/migrations/` in numeric order (002 onwards). `017_data_api_grants.sql` must be included, otherwise the API returns "permission denied" on a fresh project.
+
+> **Grant rule for new migrations:** from 30 Oct 2026 Supabase no longer auto-grants API access on new tables in `public`. Every `CREATE TABLE` or `CREATE VIEW` must be followed by its own `GRANT` statements in the same migration. Use `authenticated` + `service_role` for normal tables, `service_role` only for token or credential tables. See `017_data_api_grants.sql` for the pattern.
 
 ---
 
