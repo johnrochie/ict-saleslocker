@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { formatDate } from '@/lib/utils/formatting'
-import { AM_TIERS, SALES_TEAM } from '@/lib/config'
+import Papa from 'papaparse'
+import { AM_TIERS, SALES_TEAM, repDisplayName, toAutotaskName } from '@/lib/config'
 
 // ── Types (mirror /api/account-management) ───────────────────
 interface Meeting {
@@ -335,101 +336,230 @@ function Coverage({ data }: { data: Data }) {
 }
 
 // ── Customers admin (managers) ───────────────────────────────
+interface ImportRow { company: string; account_manager: string; tier: string; annual_revenue: string; problem: string | null; isNew: boolean }
+
+const amLabel = (key: string) => repDisplayName(key)
+
+async function saveCustomers(customers: Array<Record<string, unknown>>) {
+  const res = await fetch('/api/account-management/customers', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customers }),
+  })
+  const json = await res.json()
+  return { ok: res.ok, json }
+}
+
 function Customers({ onChanged }: { onChanged: () => void }) {
-  const [list, setList] = useState<CustomerRow[]>([])
-  const [paste, setPaste] = useState('')
-  const [defaultAm, setDefaultAm] = useState(SALES_TEAM[0].key)
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [list, setList]           = useState<CustomerRow[]>([])
+  const [companies, setCompanies] = useState<string[]>([])
+  const [search, setSearch]       = useState('')
+  const [amFilter, setAmFilter]   = useState('all')
+  const [form, setForm]           = useState({ company: '', tier: '', am: '', revenue: '' })
+  const [msg, setMsg]             = useState<{ ok: boolean; text: string } | null>(null)
+  const [busy, setBusy]           = useState(false)
+  const [preview, setPreview]     = useState<ImportRow[] | null>(null)
 
   const load = useCallback(async () => {
     const res = await fetch('/api/account-management/customers')
-    if (res.ok) setList((await res.json()).customers)
+    if (!res.ok) return
+    const json = await res.json()
+    setList(json.customers); setCompanies(json.companies ?? [])
   }, [])
   useEffect(() => { load() }, [load])
 
-  async function save() {
-    // One customer per line:  Company, Tier, Account manager (optional), Annual revenue (optional)
-    // Tab-separated (pasted from Excel) works too. AM may be the full "Surname, Firstname" name in quotes,
-    // a first name, or left blank to use the AM picked above.
-    const customers = paste.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
-      const parts = (line.includes('\t') ? line.split('\t') : line.split(',')).map(p => p.trim().replace(/^"|"$/g, ''))
-      const [company, tier, amRaw, rev] = parts
-      const amLower = (amRaw ?? '').toLowerCase()
-      const team = SALES_TEAM.find(r =>
-        r.key.toLowerCase() === amLower || r.display.toLowerCase() === amLower || r.first.toLowerCase() === amLower)
-      return { company, tier, account_manager: team?.key ?? (amRaw || defaultAm), annual_revenue: rev }
-    })
+  // AM choices: the sales team plus anyone already holding customers
+  const amOptions = useMemo(() => {
+    const keys = new Set<string>(SALES_TEAM.map(r => r.key))
+    list.forEach(c => keys.add(c.account_manager))
+    return [...keys].sort((a, b) => amLabel(a).localeCompare(amLabel(b)))
+  }, [list])
+
+  const existingNames = useMemo(() => new Set(list.map(c => c.company.toLowerCase())), [list])
+  const knownInAutotask = useMemo(() => new Set(companies.map(c => c.toLowerCase())), [companies])
+
+  const formName = form.company.trim()
+  const formProblem =
+    !formName ? null
+    : existingNames.has(formName.toLowerCase()) ? 'Already in the list. Saving will update it.'
+    : companies.length > 0 && !knownInAutotask.has(formName.toLowerCase())
+      ? 'Not found in Autotask meetings or opportunities yet. Check the spelling matches Autotask exactly.'
+      : null
+
+  async function addOne() {
     setBusy(true); setMsg(null)
-    const res = await fetch('/api/account-management/customers', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customers }),
-    })
-    const json = await res.json()
+    const { ok, json } = await saveCustomers([{ company: form.company, tier: form.tier, account_manager: form.am, annual_revenue: form.revenue }])
     setBusy(false)
-    if (!res.ok) return setMsg({ ok: false, text: json.error ?? 'Save failed' })
-    setMsg({ ok: true, text: `Saved: ${json.inserted} added, ${json.updated} updated.` })
-    setPaste(''); load(); onChanged()
+    if (!ok) return setMsg({ ok: false, text: json.error ?? 'Save failed' })
+    setMsg({ ok: true, text: `${form.company.trim()} ${json.updated ? 'updated' : 'added'}.` })
+    setForm(f => ({ company: '', tier: f.tier, am: f.am, revenue: '' }))   // keep tier + AM for rapid entry
+    load(); onChanged()
   }
 
-  async function remove(id: string) {
-    if (!confirm('Remove this customer from the AM programme?')) return
+  async function update(c: CustomerRow, patch: Partial<CustomerRow>) {
+    const next = { ...c, ...patch }
+    setList(l => l.map(x => (x.id === c.id ? next : x)))
+    const { ok, json } = await saveCustomers([next])
+    if (!ok) { setMsg({ ok: false, text: json.error ?? 'Save failed' }); load() } else onChanged()
+  }
+
+  async function remove(id: string, name: string) {
+    if (!confirm(`Remove ${name} from the AM programme?`)) return
     await fetch(`/api/account-management/customers?id=${id}`, { method: 'DELETE' })
     load(); onChanged()
   }
 
-  const byAm = useMemo(() => {
-    const m = new Map<string, CustomerRow[]>()
-    list.forEach(c => m.set(c.account_manager, [...(m.get(c.account_manager) ?? []), c]))
-    return [...m.entries()]
-  }, [list])
+  // ── CSV import with preview ────────────────────────────────
+  function pick(row: Record<string, string>, names: string[]) {
+    const k = Object.keys(row).find(h => names.includes(h.trim().toLowerCase()))
+    return k ? String(row[k] ?? '').trim() : ''
+  }
+  function onFile(file: File | undefined) {
+    if (!file) return
+    setMsg(null)
+    Papa.parse<Record<string, string>>(file, {
+      header: true, skipEmptyLines: true,
+      complete: res => {
+        const seen = new Set<string>()
+        const rows: ImportRow[] = res.data.map(r => {
+          const company = pick(r, ['customer', 'name', 'company', 'customer name'])
+          const am      = pick(r, ['account manager', 'am', 'account_manager'])
+          const tier    = pick(r, ['tier', 'retier'])
+          const rev     = pick(r, ['annual revenue', 'revenue', 'annual_revenue', 'fy25 - totals'])
+          let problem: string | null = null
+          if (!company) problem = 'No customer name'
+          else if (!am) problem = 'No account manager'
+          else if (!AM_TIERS.some(t => t.tier === tier)) problem = `Tier "${tier}" is not 1+, 1, 2, 3, 4 or 5`
+          else if (seen.has(company.toLowerCase())) problem = 'Duplicate in file'
+          seen.add(company.toLowerCase())
+          return { company, account_manager: toAutotaskName(am), tier, annual_revenue: rev, problem, isNew: !existingNames.has(company.toLowerCase()) }
+        })
+        setPreview(rows)
+      },
+      error: err => setMsg({ ok: false, text: err.message }),
+    })
+  }
+  async function confirmImport() {
+    if (!preview) return
+    setBusy(true)
+    const good = preview.filter(r => !r.problem)
+    const { ok, json } = await saveCustomers(good.map(r => ({ company: r.company, account_manager: r.account_manager, tier: r.tier, annual_revenue: r.annual_revenue })))
+    setBusy(false)
+    if (!ok) return setMsg({ ok: false, text: json.error ?? 'Import failed' })
+    setMsg({ ok: true, text: `Imported: ${json.inserted} added, ${json.updated} updated, ${preview.length - good.length} skipped.` })
+    setPreview(null); load(); onChanged()
+  }
+
+  const shown = list.filter(c =>
+    (amFilter === 'all' || c.account_manager === amFilter) &&
+    (!search || c.company.toLowerCase().includes(search.toLowerCase())))
+
+  const inputCls = 'text-sm border border-gray-200 rounded-lg px-3 py-1.5 w-full'
+  const canAdd = !!form.company.trim() && !!form.tier && !!form.am && !busy
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-      <div className="lg:col-span-1 space-y-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-navy-700">Add or update customers</h3>
-          <p className="text-xs text-gray-500">
-            One per line: <code>Company, Tier, Account manager, Annual revenue</code>. Last two are optional. Paste straight from Excel if easier.
-            Company must match the Autotask name exactly. Existing customers are updated.
-          </p>
-          <label className="block text-xs text-gray-500">Account manager when left blank
-            <select value={defaultAm} onChange={e => setDefaultAm(e.target.value)} className="mt-1 block w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5">
-              {SALES_TEAM.map(r => <option key={r.key} value={r.key}>{r.display}</option>)}
+    <div className="space-y-5">
+      {/* Add one customer */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+        <h3 className="text-sm font-semibold text-navy-700">Add a customer</h3>
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+          <label className="md:col-span-4 text-xs text-gray-500">Customer
+            <input list="am-company-list" value={form.company} onChange={e => setForm({ ...form, company: e.target.value })}
+              placeholder="Start typing to pick from Autotask" className={inputCls + ' mt-1'} />
+            <datalist id="am-company-list">{companies.map(c => <option key={c} value={c} />)}</datalist>
+          </label>
+          <label className="md:col-span-3 text-xs text-gray-500">Account manager
+            <select value={form.am} onChange={e => setForm({ ...form, am: e.target.value })} className={inputCls + ' mt-1'}>
+              <option value="">Choose...</option>
+              {amOptions.map(k => <option key={k} value={k}>{amLabel(k)}</option>)}
             </select>
           </label>
-          <textarea value={paste} onChange={e => setPaste(e.target.value)} rows={8}
-            placeholder={'Acme Ltd, 2\nBeta Foods, 1+, Jamie, 780000'}
-            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 font-mono" />
-          <button onClick={save} disabled={busy || !paste.trim()}
-            className="w-full text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 disabled:opacity-40 rounded-lg px-3 py-2">
-            {busy ? 'Saving...' : 'Save customers'}
+          <label className="md:col-span-2 text-xs text-gray-500">Tier
+            <select value={form.tier} onChange={e => setForm({ ...form, tier: e.target.value })} className={inputCls + ' mt-1'}>
+              <option value="">Choose...</option>
+              {AM_TIERS.map(t => <option key={t.tier} value={t.tier}>{t.tier}  ({t.band})</option>)}
+            </select>
+          </label>
+          <label className="md:col-span-2 text-xs text-gray-500">Annual revenue
+            <input type="number" min="0" value={form.revenue} onChange={e => setForm({ ...form, revenue: e.target.value })}
+              placeholder="Optional" className={inputCls + ' mt-1'} />
+          </label>
+          <button onClick={addOne} disabled={!canAdd}
+            className="md:col-span-1 text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 disabled:opacity-40 rounded-lg px-3 py-2">
+            Add
           </button>
-          {msg && <p className={'text-xs whitespace-pre-line ' + (msg.ok ? 'text-green-700' : 'text-red-600')}>{msg.text}</p>}
         </div>
+        {formProblem && <p className="text-xs text-amber-600">{formProblem}</p>}
+        {msg && <p className={'text-xs whitespace-pre-line ' + (msg.ok ? 'text-green-700' : 'text-red-600')}>{msg.text}</p>}
 
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <h3 className="text-sm font-semibold text-navy-700 mb-2">Tiers and visit targets</h3>
-          <Table head={['Tier', 'Revenue', 'Visits / yr']} empty=""
-            rows={AM_TIERS.map(t => [<TierPill key="t" tier={t.tier} />, t.band, t.visitsPerYear ? `${t.visitsPerYear} (${t.cadence})` : t.cadence])} />
+        <div className="border-t border-gray-100 pt-3 flex items-center gap-3 flex-wrap">
+          <span className="text-xs text-gray-500">Adding many at once?</span>
+          <label className="text-xs text-brand-600 border border-brand-300 rounded-lg px-3 py-1.5 hover:bg-brand-50 cursor-pointer">
+            Import a CSV
+            <input type="file" accept=".csv" className="hidden" onChange={e => { onFile(e.target.files?.[0]); e.target.value = '' }} />
+          </label>
+          <span className="text-xs text-gray-400">Columns: Customer, Account Manager, Tier, Annual Revenue. You get a preview before anything is saved.</span>
         </div>
       </div>
 
-      <div className="lg:col-span-2 space-y-4">
-        {byAm.length === 0 && <p className="text-sm text-gray-400 italic">No customers added yet.</p>}
-        {byAm.map(([am, rows]) => (
-          <div key={am} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-100 flex justify-between">
-              <h3 className="text-sm font-semibold text-navy-700">{SALES_TEAM.find(r => r.key === am)?.display ?? am}</h3>
-              <span className="text-xs text-gray-400">{rows.length} customers</span>
+      {/* Import preview */}
+      {preview && (
+        <div className="bg-white rounded-xl border border-brand-300 p-5 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-navy-700">Import preview</h3>
+              <p className="text-xs text-gray-500">
+                {preview.filter(r => !r.problem && r.isNew).length} new, {preview.filter(r => !r.problem && !r.isNew).length} to update,{' '}
+                <span className={preview.some(r => r.problem) ? 'text-red-600 font-semibold' : ''}>{preview.filter(r => r.problem).length} with problems (skipped)</span>
+              </p>
             </div>
-            <div className="p-4">
-              <Table head={['Customer', 'Tier', 'Revenue', '']} empty=""
-                rows={rows.map(c => [c.company, <TierPill key="t" tier={c.tier} />,
-                  c.annual_revenue ? eur(c.annual_revenue) : '—',
-                  <button key="x" onClick={() => remove(c.id)} className="text-xs text-gray-400 hover:text-red-600">Remove</button>])} />
+            <div className="flex gap-2">
+              <button onClick={() => setPreview(null)} className="text-sm text-gray-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50">Cancel</button>
+              <button onClick={confirmImport} disabled={busy || preview.every(r => r.problem)}
+                className="text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 disabled:opacity-40 rounded-lg px-4 py-1.5">
+                {busy ? 'Importing...' : `Import ${preview.filter(r => !r.problem).length}`}
+              </button>
             </div>
           </div>
-        ))}
+          <div className="max-h-72 overflow-y-auto">
+            <Table head={['Customer', 'AM', 'Tier', 'Result']} empty=""
+              rows={[...preview].sort((a, b) => Number(!!b.problem) - Number(!!a.problem)).map(r => [
+                r.company || '—', r.account_manager ? amLabel(r.account_manager) : '—', r.tier || '—',
+                r.problem ? <span key="p" className="text-xs text-red-600">{r.problem}</span>
+                  : <span key="ok" className="text-xs text-gray-500">{r.isNew ? 'New' : 'Update'}</span>,
+              ])} />
+          </div>
+        </div>
+      )}
+
+      {/* Customer list */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3 flex-wrap">
+          <h3 className="text-sm font-semibold text-navy-700 mr-auto">Customers ({shown.length}{shown.length !== list.length ? ` of ${list.length}` : ''})</h3>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..." className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 w-48" />
+          <select value={amFilter} onChange={e => setAmFilter(e.target.value)} className="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+            <option value="all">All account managers</option>
+            {amOptions.filter(k => list.some(c => c.account_manager === k)).map(k => <option key={k} value={k}>{amLabel(k)}</option>)}
+          </select>
+        </div>
+        <div className="p-4 max-h-[600px] overflow-y-auto">
+          <Table head={['Customer', 'Account manager', 'Tier', 'Revenue', '']} empty="No customers yet. Add one above or import a CSV."
+            rows={shown.map(c => [
+              <span key="c" className="font-medium text-gray-800">{c.company}</span>,
+              <select key="a" value={c.account_manager} onChange={e => update(c, { account_manager: e.target.value })} className="text-xs border border-gray-200 rounded px-2 py-1">
+                {amOptions.map(k => <option key={k} value={k}>{amLabel(k)}</option>)}
+              </select>,
+              <select key="t" value={c.tier} onChange={e => update(c, { tier: e.target.value })} className="text-xs border border-gray-200 rounded px-2 py-1">
+                {AM_TIERS.map(t => <option key={t.tier} value={t.tier}>{t.tier}</option>)}
+              </select>,
+              c.annual_revenue ? eur(c.annual_revenue) : '—',
+              <button key="x" onClick={() => remove(c.id, c.company)} className="text-xs text-gray-400 hover:text-red-600">Remove</button>,
+            ])} />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <h3 className="text-sm font-semibold text-navy-700 mb-2">Tiers and visit targets</h3>
+        <Table head={['Tier', 'Revenue band', 'Visits per year']} empty=""
+          rows={AM_TIERS.map(t => [<TierPill key="t" tier={t.tier} />, t.band, t.visitsPerYear ? `${t.visitsPerYear} (${t.cadence})` : t.cadence])} />
       </div>
     </div>
   )

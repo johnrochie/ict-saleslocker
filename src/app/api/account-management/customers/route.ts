@@ -24,9 +24,16 @@ async function managerOnly() {
 export async function GET() {
   const a = await managerOnly()
   if ('error' in a) return a.error
-  const { data, error } = await a.admin.from('am_customers').select('*').order('company').limit(5000)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ customers: data })
+  const [cust, meet, opps] = await Promise.all([
+    a.admin.from('am_customers').select('*').order('company').limit(5000),
+    a.admin.from('meetings').select('company').limit(20000),
+    a.admin.from('opportunities').select('company').limit(20000),
+  ])
+  if (cust.error) return NextResponse.json({ error: cust.error.message }, { status: 500 })
+  // Company names already seen in Autotask data, offered as suggestions so new customers are spelt the way Autotask has them
+  const names = new Set<string>()
+  for (const r of [...(meet.data ?? []), ...(opps.data ?? [])]) if (r.company) names.add(String(r.company))
+  return NextResponse.json({ customers: cust.data, companies: [...names].sort((x, y) => x.localeCompare(y)) })
 }
 
 // Body: { customers: [{ company, account_manager, tier, annual_revenue?, notes?, is_active? }] }

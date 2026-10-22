@@ -160,3 +160,13 @@ export const AM_TIERS: AmTierConfig[] = [
 export function amTierConfig(tier: string): AmTierConfig | undefined {
   return AM_TIERS.find(t => t.tier === tier)
 }
+
+/** "Jade McBride" -> "McBride, Jade" (Autotask resource name format). Names already in that form are returned as is. */
+export function toAutotaskName(name: string): string {
+  const n = name.trim().replace(/\s+/g, ' ')
+  if (!n || n.includes(',')) return n
+  const known = SALES_TEAM.find(r => r.display.toLowerCase() === n.toLowerCase())
+  if (known) return known.key
+  const parts = n.split(' ')
+  return parts.length < 2 ? n : `${parts.slice(1).join(' ')}, ${parts[0]}`
+}
