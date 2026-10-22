@@ -1,55 +1,175 @@
+// ============================================================
+// ICT SalesIQ — GET /api/account-management?month=YYYY-MM
+// Everything on the AM dashboard comes from Autotask data already
+// synced into SalesIQ: meetings (visits), opportunities with Lead
+// Source = "Account Management Visit", plus the am_customers table
+// for ownership and tier.
+// ============================================================
+
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
-import { SALES_TEAM, monthBounds } from '@/lib/config'
+import {
+  SALES_TEAM, monthBounds, repDisplayName, amTierConfig,
+  AM_LEAD_SOURCE, AM_MEETING_TYPE, AM_DEFAULT_MONTHLY_TARGET,
+} from '@/lib/config'
 
-const MONTHLY_TARGET = 7
-
-interface AmMeeting {
+interface Meeting {
   company: string; opportunity: string | null; contact: string | null
-  assigned_to: string | null; action_type: string | null; classification: string | null
-  start_date: string | null; start_time: string | null; description: string | null
+  assigned_to: string | null; start_date: string | null; start_time: string | null
+  description: string | null
 }
+interface Customer {
+  company: string; account_manager: string; tier: string
+  annual_revenue: number | null; is_active: boolean
+}
+interface Opp {
+  autotask_id: number | null; company: string; opportunity_name: string
+  opportunity_owner: string | null; account_manager: string | null
+  revenue_total: number | null; normalised_status: string; stage: string | null
+  created_date: string | null; closed_date: string | null
+}
+
+const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase()
+const addDays = (iso: string, n: number) => {
+  const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+const daysBetween = (a: string, b: string) =>
+  Math.round((new Date(b + 'T00:00:00Z').getTime() - new Date(a + 'T00:00:00Z').getTime()) / 86_400_000)
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const monthKey = new URL(request.url).searchParams.get('month') ?? undefined
-  const month    = monthBounds(monthKey)
-  const admin    = createAdminSupabaseClient()
-  const today    = new Date().toISOString().slice(0, 10)
-
-  const { data: meetings, error } = await admin
-    .from('meetings')
-    .select('company, opportunity, contact, assigned_to, action_type, classification, start_date, start_time, description')
-    .eq('action_type', 'Account Management Meeting')
-    .gte('start_date', month.from).lte('start_date', month.to)
-    .order('start_date', { ascending: true })
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  const byRep = new Map<string, AmMeeting[]>()
-  for (const rep of SALES_TEAM) byRep.set(rep.key, [])
-  for (const m of meetings ?? []) {
-    const rep = m.assigned_to ?? 'Unassigned'
-    if (!byRep.has(rep)) byRep.set(rep, [])
-    byRep.get(rep)!.push(m)
+  const admin = createAdminSupabaseClient()
+  const { data: profile } = await admin
+    .from('profiles').select('role, autotask_name').eq('id', user.id).single()
+  const role      = profile?.role ?? 'read_only'
+  const isManager = ['admin', 'sales_manager'].includes(role)
+  if (!isManager && role !== 'sales_rep') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const ownKey = profile?.autotask_name ?? null
+  if (!isManager && !ownKey) {
+    return NextResponse.json({ error: 'Your Autotask name is not set on your profile. Ask an admin to set it.' }, { status: 409 })
   }
 
-  const reps = Array.from(byRep.entries()).map(([key, list]) => {
-    const held    = list.filter(m => !!m.start_date && m.start_date <= today)
-    const planned = list.filter(m => !!m.start_date && m.start_date > today)
-    const repConfig = SALES_TEAM.find(r => r.key === key)
+  const monthKey  = new URL(request.url).searchParams.get('month') ?? undefined
+  const month     = monthBounds(monthKey)
+  const next      = monthBounds(addDays(month.to, 1).slice(0, 7))
+  const today     = new Date().toISOString().slice(0, 10)
+  const yearStart = `${month.from.slice(0, 4)}-01-01`
+  const lookback  = addDays(today, -400)   // enough for a rolling 12 months of visits
+
+  const [meetingsRes, customersRes, oppsRes] = await Promise.all([
+    admin.from('meetings')
+      .select('company, opportunity, contact, assigned_to, start_date, start_time, description')
+      .eq('action_type', AM_MEETING_TYPE)
+      .gte('start_date', lookback).lte('start_date', next.to)
+      .order('start_date', { ascending: true }).limit(10000),
+    admin.from('am_customers')
+      .select('company, account_manager, tier, annual_revenue, is_active')
+      .eq('is_active', true).limit(5000),
+    admin.from('opportunities')
+      .select('autotask_id, company, opportunity_name, opportunity_owner, account_manager, revenue_total, normalised_status, stage, created_date, closed_date')
+      .ilike('lead_source', AM_LEAD_SOURCE)
+      .gte('created_date', `${yearStart}T00:00:00`).limit(5000),
+  ])
+  const err = meetingsRes.error ?? customersRes.error ?? oppsRes.error
+  if (err) return NextResponse.json({ error: err.message }, { status: 500 })
+
+  const meetings  = (meetingsRes.data ?? []) as Meeting[]
+  const customers = (customersRes.data ?? []) as Customer[]
+  const opps      = (oppsRes.data ?? []) as Opp[]
+  const custByName = new Map(customers.map(c => [norm(c.company), c]))
+
+  // Reps shown: whole team for managers, just the signed-in AM otherwise
+  const repKeys = new Set<string>(SALES_TEAM.map(r => r.key))
+  customers.forEach(c => repKeys.add(c.account_manager))
+  meetings.forEach(m => { if (m.assigned_to) repKeys.add(m.assigned_to) })
+  const visibleKeys = [...repKeys].filter(k => isManager || k === ownKey)
+
+  const withTier = (m: Meeting) => {
+    const c = custByName.get(norm(m.company))
+    return { ...m, tier: c?.tier ?? null, inList: !!c }
+  }
+  const oppOwner = (o: Opp) =>
+    (o.opportunity_owner && repKeys.has(o.opportunity_owner)) ? o.opportunity_owner : o.account_manager
+  const sum = (l: Opp[]) => l.reduce((s, o) => s + (o.revenue_total ?? 0), 0)
+
+  const reps = visibleKeys.map(key => {
+    const mine         = meetings.filter(m => m.assigned_to === key && m.start_date)
+    const myCusts      = customers.filter(c => c.account_manager === key)
+    const annualVisits = myCusts.reduce((s, c) => s + (amTierConfig(c.tier)?.visitsPerYear ?? 0), 0)
+    const hasCusts     = myCusts.length > 0
+    const target       = hasCusts ? Math.round((annualVisits / 12) * 10) / 10 : AM_DEFAULT_MONTHLY_TARGET
+
+    const inMonth = mine.filter(m => m.start_date! >= month.from && m.start_date! <= month.to)
+    const inNext  = mine.filter(m => m.start_date! >= next.from && m.start_date! <= next.to)
+    const held    = inMonth.filter(m => m.start_date! <= today).map(withTier)
+    const planned = inMonth.filter(m => m.start_date! > today).map(withTier)
+
+    const myOpps    = opps.filter(o => oppOwner(o) === key)
+    const monthOpps = myOpps.filter(o => {
+      const d = o.created_date?.slice(0, 10)
+      return !!d && d >= month.from && d <= month.to
+    })
+    const won  = myOpps.filter(o => o.normalised_status === 'won')
+    const open = myOpps.filter(o => o.normalised_status === 'pipeline')
+
     return {
-      key,
-      display: repConfig?.display ?? key,
-      held,
-      planned,
-      total:  held.length + planned.length,
-      target: MONTHLY_TARGET,
+      key, display: repDisplayName(key),
+      customerCount: myCusts.length,
+      annualVisitTarget: annualVisits,
+      target, targetIsDefault: !hasCusts,
+      held, planned,
+      nextMonthPlanned: inNext.map(withTier),
+      nextMonthTarget: target,
+      opps: {
+        month: monthOpps.map(o => ({
+          id: o.autotask_id, company: o.company, name: o.opportunity_name,
+          value: o.revenue_total ?? 0, status: o.normalised_status, stage: o.stage,
+          created: o.created_date?.slice(0, 10) ?? null,
+        })),
+        monthCount: monthOpps.length, monthValue: sum(monthOpps),
+        ytdCount: myOpps.length, ytdValue: sum(myOpps),
+        ytdWonCount: won.length, ytdWonValue: sum(won),
+        openCount: open.length, openValue: sum(open),
+      },
     }
   }).sort((a, b) => a.display.localeCompare(b.display))
 
-  return NextResponse.json({ month, target: MONTHLY_TARGET, reps })
+  // ── Coverage: every customer against its tier cadence ───────
+  const coverage = customers
+    .filter(c => isManager || c.account_manager === ownKey)
+    .map(c => {
+      const cfg         = amTierConfig(c.tier)
+      const visits      = meetings.filter(m => norm(m.company) === norm(c.company) && m.start_date)
+      const held12      = visits.filter(m => m.start_date! <= today && m.start_date! > addDays(today, -365))
+      const lastVisit   = visits.filter(m => m.start_date! <= today).map(m => m.start_date!).sort().pop() ?? null
+      const nextPlanned = visits.filter(m => m.start_date! > today).map(m => m.start_date!).sort()[0] ?? null
+      const perYear     = cfg?.visitsPerYear ?? 0
+      let status: 'overdue' | 'due_soon' | 'ok' | 'phone_only' = 'ok'
+      if (perYear === 0) status = 'phone_only'
+      else {
+        const interval = 365 / perYear
+        const since    = lastVisit ? daysBetween(lastVisit, today) : Infinity
+        if (since > interval + 14) status = 'overdue'
+        else if (since > interval - 30) status = 'due_soon'
+      }
+      return {
+        company: c.company, account_manager: c.account_manager,
+        am_display: repDisplayName(c.account_manager),
+        tier: c.tier, visitsPerYear: perYear, cadence: cfg?.cadence ?? '',
+        visits12m: held12.length, lastVisit, nextPlanned,
+        daysSince: lastVisit ? daysBetween(lastVisit, today) : null,
+        status,
+      }
+    })
+    .sort((a, b) => a.am_display.localeCompare(b.am_display) || a.tier.localeCompare(b.tier) || a.company.localeCompare(b.company))
+
+  return NextResponse.json({
+    month, nextMonth: { label: next.label, monthKey: next.monthKey },
+    today, role, isManager, ownKey, leadSource: AM_LEAD_SOURCE,
+    reps, coverage,
+  })
 }

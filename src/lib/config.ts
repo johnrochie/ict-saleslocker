@@ -123,3 +123,40 @@ export function monthBounds(monthKey?: string): MonthBounds {
     monthKey: `${year}-${pad(month)}`,
   }
 }
+
+
+// ── Account Management programme ──────────────────────────
+
+/** Autotask "Lead Source" value the AM picks on an opportunity that came from a visit. */
+export const AM_LEAD_SOURCE = 'Account Management Visit'
+
+/** Autotask meeting action type that counts as an AM visit. */
+export const AM_MEETING_TYPE = 'Account Management Meeting'
+
+/** Used when an AM has no customers assigned yet (the old fixed target). */
+export const AM_DEFAULT_MONTHLY_TARGET = 7
+
+export type AmTier = '1+' | '1' | '2' | '3' | '4' | '5'
+
+export interface AmTierConfig {
+  tier: AmTier
+  band: string            // revenue band, for display
+  visitsPerYear: number   // face-to-face visit target (QBR = 4, HBR = 2, ABR = 1)
+  callsPerYear: number    // AM phone calls, for tiers with no visit
+  cadence: string
+}
+
+// From the Account Management process deck, "Engagement by tier (per year)".
+// Tier 3 is "2 (HBR) / 1 (ABR)" on the slide; 2 is used as the target.
+export const AM_TIERS: AmTierConfig[] = [
+  { tier: '1+', band: '> €1M',          visitsPerYear: 4, callsPerYear: 0, cadence: 'Quarterly (QBR)'   },
+  { tier: '1',  band: '€500K – €1M', visitsPerYear: 4, callsPerYear: 0, cadence: 'Quarterly (QBR)'   },
+  { tier: '2',  band: '€250K – €500K', visitsPerYear: 4, callsPerYear: 0, cadence: 'Quarterly (QBR)'   },
+  { tier: '3',  band: '€100K – €250K', visitsPerYear: 2, callsPerYear: 0, cadence: 'Half-yearly (HBR)' },
+  { tier: '4',  band: '€25K – €100K',  visitsPerYear: 0, callsPerYear: 2, cadence: 'Phone, half-yearly' },
+  { tier: '5',  band: '€0 – €25K',     visitsPerYear: 0, callsPerYear: 1, cadence: 'Phone, yearly'      },
+]
+
+export function amTierConfig(tier: string): AmTierConfig | undefined {
+  return AM_TIERS.find(t => t.tier === tier)
+}

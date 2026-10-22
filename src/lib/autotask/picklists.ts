@@ -16,6 +16,7 @@ export interface OpportunityPicklists {
   classification: PicklistMap  // Opportunity.classification
   lineOfBusiness: PicklistMap  // Opportunity.lineOfBusiness
   rating:         PicklistMap  // Opportunity.rating
+  leadSource:     PicklistMap  // Opportunity.leadSource ("Account Management Visit" = AM-generated)
 }
 
 // ── Build a Map<id, label> for one field ─────────────────────
@@ -50,6 +51,7 @@ export async function fetchOpportunityPicklists(
     classification: buildPicklistMap(fields, 'classification'),
     lineOfBusiness: buildPicklistMap(fields, 'lineOfBusiness'),
     rating:         buildPicklistMap(fields, 'rating'),
+    leadSource:     buildPicklistMap(fields, 'leadSource'),
   }
 }
 

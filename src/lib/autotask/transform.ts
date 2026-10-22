@@ -114,6 +114,7 @@ export function transformOpportunity(
   const classificationLabel = resolveLabel(picklists.classification, opp.classification as number | null, null)
   const lobLabel           = resolveLabel(picklists.lineOfBusiness,  opp.lineOfBusiness,      null)
   const ratingLabel        = resolveLabel(picklists.rating,          opp.rating,              null)
+  const leadSourceLabel    = resolveLabel(picklists.leadSource,      opp.leadSource as number | null | undefined, null)
 
   // ── Normalise status ──────────────────────────────────────────
   const normalisedStatus = normaliseStatusFromStrings({
@@ -214,6 +215,7 @@ export function transformOpportunity(
     product_category: null,    // May be a UDF in some AT installations
     market:           null,
     rating:           ratingLabel,
+    lead_source:      leadSourceLabel,
 
     // ── Data quality flags ────────────────────────────────────
     cost_missing:       revenueTotal > 0 && costTotal === 0,
