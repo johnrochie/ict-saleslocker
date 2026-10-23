@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
   const yearStart = `${month.from.slice(0, 4)}-01-01`
   const lookback  = addDays(today, -400)   // enough for a rolling 12 months of visits
 
-  const [meetingsRes, customersRes, oppsRes] = await Promise.all([
+  const [meetingsRes, customersRes, oppsRes, tiersRes, overridesRes] = await Promise.all([
     admin.from('meetings')
       .select('company, opportunity, contact, assigned_to, start_date, start_time, description')
       .eq('action_type', AM_MEETING_TYPE)
@@ -73,9 +73,23 @@ export async function GET(request: NextRequest) {
       .select('autotask_id, company, opportunity_name, opportunity_owner, account_manager, revenue_total, normalised_status, stage, created_date, closed_date')
       .ilike('lead_source', AM_LEAD_SOURCE)
       .gte('created_date', `${yearStart}T00:00:00`).limit(5000),
+    admin.from('am_tier_settings').select('tier, visits_per_year'),
+    admin.from('am_target_overrides').select('account_manager, month, monthly_target'),
   ])
-  const err = meetingsRes.error ?? customersRes.error ?? oppsRes.error
+  const err = meetingsRes.error ?? customersRes.error ?? oppsRes.error ?? tiersRes.error ?? overridesRes.error
   if (err) return NextResponse.json({ error: err.message }, { status: 500 })
+
+  // Tier cadence is editable in the app; the config values are the fallback
+  const tierSettings = new Map((tiersRes.data ?? []).map(t => [t.tier as string, t.visits_per_year as number]))
+  const tierVisits   = (tier: string) => tierSettings.get(tier) ?? amTierConfig(tier)?.visitsPerYear ?? 0
+  const overrides    = new Map((overridesRes.data ?? []).map(o => [`${o.account_manager}|${o.month}`, Number(o.monthly_target)]))
+  // A month-specific override wins over the standing one (month = '')
+  const overrideFor = (key: string, monthKey: string) => {
+    const m = overrides.get(`${key}|${monthKey}`)
+    if (m != null) return { value: m, scope: 'month' as const }
+    const st = overrides.get(`${key}|`)
+    return st != null ? { value: st, scope: 'standing' as const } : null
+  }
 
   const meetings  = (meetingsRes.data ?? []) as Meeting[]
   const customers = (customersRes.data ?? []) as Customer[]
@@ -99,9 +113,12 @@ export async function GET(request: NextRequest) {
   const reps = visibleKeys.map(key => {
     const mine         = meetings.filter(m => m.assigned_to === key && m.start_date)
     const myCusts      = customers.filter(c => c.account_manager === key)
-    const annualVisits = myCusts.reduce((s, c) => s + (amTierConfig(c.tier)?.visitsPerYear ?? 0), 0)
+    const annualVisits = myCusts.reduce((s, c) => s + tierVisits(c.tier), 0)
     const hasCusts     = myCusts.length > 0
-    const target       = hasCusts ? Math.round((annualVisits / 12) * 10) / 10 : AM_DEFAULT_MONTHLY_TARGET
+    const calculated   = hasCusts ? Math.round((annualVisits / 12) * 10) / 10 : AM_DEFAULT_MONTHLY_TARGET
+    const ovr          = overrideFor(key, month.monthKey)
+    const ovrNext      = overrideFor(key, next.monthKey)
+    const target       = ovr ? ovr.value : calculated
 
     const inMonth = mine.filter(m => m.start_date! >= month.from && m.start_date! <= month.to)
     const inNext  = mine.filter(m => m.start_date! >= next.from && m.start_date! <= next.to)
@@ -120,10 +137,14 @@ export async function GET(request: NextRequest) {
       key, display: repDisplayName(key),
       customerCount: myCusts.length,
       annualVisitTarget: annualVisits,
-      target, targetIsDefault: !hasCusts,
+      target, targetIsDefault: !hasCusts && !ovr,
+      calculatedTarget: calculated,
+      standingOverride: overrides.get(`${key}|`) ?? null,
+      monthOverride: overrides.get(`${key}|${month.monthKey}`) ?? null,
+      overrideScope: ovr?.scope ?? null,
       held, planned,
       nextMonthPlanned: inNext.map(withTier),
-      nextMonthTarget: target,
+      nextMonthTarget: ovrNext ? ovrNext.value : calculated,
       opps: {
         month: monthOpps.map(o => ({
           id: o.autotask_id, company: o.company, name: o.opportunity_name,
@@ -147,7 +168,7 @@ export async function GET(request: NextRequest) {
       const held12      = visits.filter(m => m.start_date! <= today && m.start_date! > addDays(today, -365))
       const lastVisit   = visits.filter(m => m.start_date! <= today).map(m => m.start_date!).sort().pop() ?? null
       const nextPlanned = visits.filter(m => m.start_date! > today).map(m => m.start_date!).sort()[0] ?? null
-      const perYear     = cfg?.visitsPerYear ?? 0
+      const perYear     = tierVisits(c.tier)
       let status: 'overdue' | 'due_soon' | 'ok' | 'phone_only' = 'ok'
       if (perYear === 0) status = 'phone_only'
       else {
@@ -159,7 +180,7 @@ export async function GET(request: NextRequest) {
       return {
         company: c.company, account_manager: c.account_manager,
         am_display: repDisplayName(c.account_manager),
-        tier: c.tier, visitsPerYear: perYear, cadence: cfg?.cadence ?? '',
+        tier: c.tier, visitsPerYear: perYear, cadence: perYear > 0 ? `${perYear} visits a year` : (cfg?.cadence ?? ''),
         visits12m: held12.length, lastVisit, nextPlanned,
         daysSince: lastVisit ? daysBetween(lastVisit, today) : null,
         status,

@@ -17,6 +17,8 @@ interface OppRow {
 interface Rep {
   key: string; display: string; customerCount: number; annualVisitTarget: number
   target: number; targetIsDefault: boolean
+  calculatedTarget: number; standingOverride: number | null; monthOverride: number | null
+  overrideScope: 'month' | 'standing' | null
   held: Meeting[]; planned: Meeting[]; nextMonthPlanned: Meeting[]; nextMonthTarget: number
   opps: {
     month: OppRow[]; monthCount: number; monthValue: number
@@ -41,7 +43,7 @@ interface CustomerRow {
   annual_revenue: number | null; is_active: boolean
 }
 
-type Tab = 'overview' | 'review' | 'coverage' | 'customers'
+type Tab = 'overview' | 'review' | 'coverage' | 'customers' | 'targets'
 
 const eur = (n: number) => '€' + Math.round(n).toLocaleString('en-IE')
 const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1))
@@ -212,7 +214,7 @@ function Review({ data, repKey, setRepKey }: { data: Data; repKey: string; setRe
         note={`${rep.held.length} meetings held against a target of ${num(rep.target)}.`}>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Kpi label="Meetings held" value={String(rep.held.length)} sub="Logged in Autotask" />
-          <Kpi label="Target" value={num(rep.target)} sub={rep.targetIsDefault ? 'Default, no customers assigned' : `${rep.customerCount} customers by tier`} />
+          <Kpi label="Target" value={num(rep.target)} sub={rep.overrideScope ? 'Set by manager' : rep.targetIsDefault ? 'Default, no customers assigned' : `${rep.customerCount} customers by tier`} />
           <Kpi label="Variance" value={(variance > 0 ? '+' : '') + num(Math.round(variance * 10) / 10)} sub="Actual minus target" />
           <Kpi label="% of target" value={`${pct}%`} sub="Actual ÷ target" />
         </div>
@@ -574,10 +576,111 @@ function Customers({ onChanged }: { onChanged: () => void }) {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <h3 className="text-sm font-semibold text-navy-700 mb-2">Tiers and visit targets</h3>
-        <Table head={['Tier', 'Revenue band', 'Visits per year']} empty=""
-          rows={AM_TIERS.map(t => [<TierPill key="t" tier={t.tier} />, t.band, t.visitsPerYear ? `${t.visitsPerYear} (${t.cadence})` : t.cadence])} />
+    </div>
+  )
+}
+
+// ── Targets (managers) ───────────────────────────────────────
+interface TierSetting { tier: string; band: string; visits_per_year: number; calls_per_year: number }
+
+function Targets({ data, onChanged }: { data: Data; onChanged: () => void }) {
+  const [tiers, setTiers]   = useState<TierSetting[]>([])
+  const [edits, setEdits]   = useState<Record<string, { standing: string; month: string }>>({})
+  const [msg, setMsg]       = useState<{ ok: boolean; text: string } | null>(null)
+  const [busy, setBusy]     = useState(false)
+
+  const loadTiers = useCallback(async () => {
+    const res = await fetch('/api/account-management/targets')
+    if (res.ok) setTiers((await res.json()).tiers)
+  }, [])
+  useEffect(() => { loadTiers() }, [loadTiers])
+
+  // Reset the override boxes whenever the month or the data changes
+  useEffect(() => {
+    const e: Record<string, { standing: string; month: string }> = {}
+    data.reps.forEach(r => {
+      e[r.key] = { standing: r.standingOverride != null ? String(r.standingOverride) : '', month: r.monthOverride != null ? String(r.monthOverride) : '' }
+    })
+    setEdits(e)
+  }, [data])
+
+  async function post(body: unknown, okText: string) {
+    setBusy(true); setMsg(null)
+    const res = await fetch('/api/account-management/targets', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    })
+    const json = await res.json()
+    setBusy(false)
+    if (!res.ok) return setMsg({ ok: false, text: json.error ?? 'Save failed' })
+    setMsg({ ok: true, text: okText }); onChanged()
+  }
+
+  const saveTiers = () => post({ tiers: tiers.map(t => ({ tier: t.tier, visits_per_year: Number(t.visits_per_year), calls_per_year: Number(t.calls_per_year) })) }, 'Tier settings saved.')
+
+  function saveOverrides() {
+    const changes: Array<{ account_manager: string; month: string; monthly_target: number | null }> = []
+    data.reps.forEach(r => {
+      const e = edits[r.key]; if (!e) return
+      const was = { standing: r.standingOverride != null ? String(r.standingOverride) : '', month: r.monthOverride != null ? String(r.monthOverride) : '' }
+      if (e.standing !== was.standing) changes.push({ account_manager: r.key, month: '', monthly_target: e.standing === '' ? null : Number(e.standing) })
+      if (e.month !== was.month) changes.push({ account_manager: r.key, month: data.month.monthKey, monthly_target: e.month === '' ? null : Number(e.month) })
+    })
+    if (changes.length === 0) return setMsg({ ok: true, text: 'No changes to save.' })
+    post({ overrides: changes }, 'Overrides saved.')
+  }
+
+  const setTier = (tier: string, field: 'visits_per_year' | 'calls_per_year', v: string) =>
+    setTiers(ts => ts.map(t => (t.tier === tier ? { ...t, [field]: v === '' ? 0 : Number(v) } : t)))
+  const setEdit = (key: string, field: 'standing' | 'month', v: string) =>
+    setEdits(e => ({ ...e, [key]: { ...e[key], [field]: v } }))
+
+  const numCls = 'w-20 text-sm border border-gray-200 rounded-lg px-2 py-1'
+
+  return (
+    <div className="space-y-5">
+      {msg && <p className={'text-sm ' + (msg.ok ? 'text-green-700' : 'text-red-600')}>{msg.text}</p>}
+
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-navy-700">Visits per year, by tier</h3>
+          <p className="text-xs text-gray-500">
+            Each AM's monthly target is the total of their customers' visits per year divided by 12. Changing a tier here updates every AM's target and the coverage overdue rules straight away.
+          </p>
+        </div>
+        <Table head={['Tier', 'Revenue band', 'Face-to-face visits per year', 'Phone calls per year']} empty=""
+          rows={tiers.map(t => [
+            <TierPill key="t" tier={t.tier} />, t.band,
+            <input key="v" type="number" min={0} max={52} value={t.visits_per_year} onChange={e => setTier(t.tier, 'visits_per_year', e.target.value)} className={numCls} />,
+            <input key="c" type="number" min={0} max={52} value={t.calls_per_year} onChange={e => setTier(t.tier, 'calls_per_year', e.target.value)} className={numCls} />,
+          ])} />
+        <p className="text-xs text-gray-400">Phone call targets are recorded for reference. Calls aren't counted from Autotask yet.</p>
+        <button onClick={saveTiers} disabled={busy}
+          className="text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 disabled:opacity-40 rounded-lg px-4 py-1.5">Save tier settings</button>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-navy-700">Monthly target per account manager</h3>
+          <p className="text-xs text-gray-500">
+            Leave the override boxes blank to use the calculated target. A standing override applies every month. A {data.month.label} override applies to that month only and wins over the standing one.
+            Use the month picker above to set a different month.
+          </p>
+        </div>
+        <Table head={['Account manager', 'Customers', 'Calculated', 'Standing override', `${data.month.label} only`, 'Target used']} empty=""
+          rows={data.reps.map(r => {
+            const e = edits[r.key] ?? { standing: '', month: '' }
+            return [
+              <span key="a" className="font-medium text-gray-800">{r.display}</span>,
+              r.customerCount || <span key="n" className="text-amber-600">none set</span>,
+              <span key="c" className="text-gray-600">{num(r.calculatedTarget)}{r.targetIsDefault ? ' (default)' : ''}</span>,
+              <input key="s" type="number" min={0} step="0.5" value={e.standing} placeholder="—" onChange={ev => setEdit(r.key, 'standing', ev.target.value)} className={numCls} />,
+              <input key="m" type="number" min={0} step="0.5" value={e.month} placeholder="—" onChange={ev => setEdit(r.key, 'month', ev.target.value)} className={numCls} />,
+              <span key="u" className="font-semibold text-navy-700">{num(r.target)}
+                {r.overrideScope && <span className="ml-1 text-[10px] font-normal text-brand-600">{r.overrideScope === 'month' ? 'month override' : 'override'}</span>}</span>,
+            ]
+          })} />
+        <button onClick={saveOverrides} disabled={busy}
+          className="text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 disabled:opacity-40 rounded-lg px-4 py-1.5">Save overrides</button>
       </div>
     </div>
   )
@@ -619,6 +722,7 @@ export default function AccountManagementClient() {
     { id: 'review',    label: 'Monthly review',   show: true },
     { id: 'coverage',  label: 'Customer coverage', show: true },
     { id: 'customers', label: 'Customers',        show: data.isManager },
+    { id: 'targets',   label: 'Targets',          show: data.isManager },
   ]
 
   return (
@@ -660,6 +764,7 @@ export default function AccountManagementClient() {
         {tab === 'review'    && <Review data={data} repKey={repKey} setRepKey={setRepKey} />}
         {tab === 'coverage'  && <Coverage data={data} />}
         {tab === 'customers' && <Customers onChanged={() => loadData(data.month.monthKey)} />}
+        {tab === 'targets'   && <Targets data={data} onChanged={() => loadData(data.month.monthKey)} />}
       </div>
     </div>
   )
