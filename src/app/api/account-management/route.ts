@@ -30,6 +30,8 @@ interface Opp {
 }
 
 const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase()
+// Autotask has "Taylor , Jamie" on some records; tidy spacing so one person is not shown twice
+const tidyName = (s: string | null): string | null => (s ? s.replace(/\s*,\s*/g, ', ').replace(/\s+/g, ' ').trim() : s)
 const addDays = (iso: string, n: number) => {
   const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n)
   return d.toISOString().slice(0, 10)
@@ -91,9 +93,11 @@ export async function GET(request: NextRequest) {
     return st != null ? { value: st, scope: 'standing' as const } : null
   }
 
-  const meetings  = (meetingsRes.data ?? []) as Meeting[]
-  const customers = (customersRes.data ?? []) as Customer[]
-  const opps      = (oppsRes.data ?? []) as Opp[]
+  const meetings  = ((meetingsRes.data ?? []) as Meeting[]).map(m => ({ ...m, assigned_to: tidyName(m.assigned_to) }))
+  const customers = ((customersRes.data ?? []) as Customer[]).map(c => ({ ...c, account_manager: tidyName(c.account_manager) as string }))
+  const opps      = ((oppsRes.data ?? []) as Opp[]).map(o => ({
+    ...o, opportunity_owner: tidyName(o.opportunity_owner), account_manager: tidyName(o.account_manager),
+  }))
   const custByName = new Map(customers.map(c => [norm(c.company), c]))
 
   // Reps shown: whole team for managers, just the signed-in AM otherwise
