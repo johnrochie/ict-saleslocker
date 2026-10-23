@@ -407,6 +407,19 @@ function Customers({ onChanged }: { onChanged: () => void }) {
     load(); onChanged()
   }
 
+  function downloadTemplate() {
+    const am = amOptions[0] ? amLabel(amOptions[0]) : 'Jamie Taylor'
+    const lines = [
+      'Customer,Account Manager,Tier,Annual Revenue',
+      `EXAMPLE Customer Ltd (delete this row),${am},3,150000`,
+      `EXAMPLE Another Customer (delete this row),${am},1+,`,
+    ]
+    const blob = new Blob(['\uFEFF' + lines.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob); a.download = 'am_customers_template.csv'; a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
   // ── CSV import with preview ────────────────────────────────
   function pick(row: Record<string, string>, names: string[]) {
     const k = Object.keys(row).find(h => names.includes(h.trim().toLowerCase()))
@@ -419,7 +432,7 @@ function Customers({ onChanged }: { onChanged: () => void }) {
       header: true, skipEmptyLines: true,
       complete: res => {
         const seen = new Set<string>()
-        const rows: ImportRow[] = res.data.map(r => {
+        const rows: ImportRow[] = res.data.filter(r => !pick(r, ['customer', 'name', 'company', 'customer name']).toUpperCase().startsWith('EXAMPLE')).map(r => {
           const company = pick(r, ['customer', 'name', 'company', 'customer name'])
           const am      = pick(r, ['account manager', 'am', 'account_manager'])
           const tier    = pick(r, ['tier', 'retier'])
@@ -496,7 +509,12 @@ function Customers({ onChanged }: { onChanged: () => void }) {
             Import a CSV
             <input type="file" accept=".csv" className="hidden" onChange={e => { onFile(e.target.files?.[0]); e.target.value = '' }} />
           </label>
-          <span className="text-xs text-gray-400">Columns: Customer, Account Manager, Tier, Annual Revenue. You get a preview before anything is saved.</span>
+          <button onClick={downloadTemplate} className="text-xs text-gray-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50">
+            Download template
+          </button>
+          <span className="text-xs text-gray-400">
+            Columns: Customer, Account Manager, Tier (1+, 1, 2, 3, 4 or 5), Annual Revenue (optional). Account manager as "First Last". Example rows are ignored. You get a preview before anything is saved.
+          </span>
         </div>
       </div>
 
