@@ -3,18 +3,19 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { formatDate } from '@/lib/utils/formatting'
 import Papa from 'papaparse'
+import { exportReviewPptx } from './exportPptx'
 import { AM_TIERS, SALES_TEAM, repDisplayName, toAutotaskName } from '@/lib/config'
 
 // ── Types (mirror /api/account-management) ───────────────────
-interface Meeting {
+export interface Meeting {
   company: string; contact: string | null; start_date: string | null
   start_time: string | null; description: string | null; tier: string | null; inList: boolean
 }
-interface OppRow {
+export interface OppRow {
   id: number | null; company: string; name: string; value: number
   status: string; stage: string | null; created: string | null
 }
-interface Rep {
+export interface Rep {
   key: string; display: string; customerCount: number; annualVisitTarget: number
   target: number; targetIsDefault: boolean
   calculatedTarget: number; standingOverride: number | null; monthOverride: number | null
@@ -32,7 +33,7 @@ interface CoverageRow {
   lastVisit: string | null; nextPlanned: string | null; daysSince: number | null
   status: 'overdue' | 'due_soon' | 'ok' | 'phone_only'
 }
-interface Data {
+export interface Data {
   month: { from: string; to: string; label: string; monthKey: string }
   nextMonth: { label: string; monthKey: string }
   today: string; role: string; isManager: boolean; ownKey: string | null; leadSource: string
@@ -181,8 +182,17 @@ function Overview({ data, openReview }: { data: Data; openReview: (key: string) 
 
 // ── Monthly review (mirrors the AMR deck, section 01) ────────
 function Review({ data, repKey, setRepKey }: { data: Data; repKey: string; setRepKey: (k: string) => void }) {
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
   const rep = data.reps.find(r => r.key === repKey) ?? data.reps[0]
   if (!rep) return <p className="text-sm text-gray-400">No account managers found.</p>
+
+  async function download() {
+    setExporting(true); setExportError(null)
+    try { await exportReviewPptx(data, rep) }
+    catch (e) { setExportError(e instanceof Error ? e.message : 'Export failed') }
+    finally { setExporting(false) }
+  }
 
   const variance = rep.held.length - rep.target
   const pct = rep.target > 0 ? Math.round((rep.held.length / rep.target) * 100) : 0
@@ -201,14 +211,12 @@ function Review({ data, repKey, setRepKey }: { data: Data; repKey: string; setRe
             {data.reps.map(r => <option key={r.key} value={r.key}>{r.display}</option>)}
           </select>
         ) : <span className="text-sm font-semibold text-navy-700">{rep.display}</span>}
-        <button onClick={() => window.print()} className="text-xs text-gray-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50">
-          Print / save as PDF
+        <button onClick={download} disabled={exporting}
+          className="text-xs text-gray-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50">
+          {exporting ? 'Building...' : 'Download PowerPoint'}
         </button>
       </div>
-
-      <div className="hidden print:block">
-        <h2 className="text-lg font-semibold">{rep.display} — Account Management Review, {data.month.label}</h2>
-      </div>
+      {exportError && <p className="text-xs text-red-600">{exportError}</p>}
 
       <Section no="01 · Meetings" title={`Meetings conducted in ${data.month.label}`}
         note={`${rep.held.length} meetings held against a target of ${num(rep.target)}.`}>
