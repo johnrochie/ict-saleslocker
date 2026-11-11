@@ -130,6 +130,14 @@ export function monthBounds(monthKey?: string): MonthBounds {
 /** Autotask "Lead Source" value the AM picks on an opportunity that came from a visit. */
 export const AM_LEAD_SOURCE = 'Account Management Visit'
 
+/**
+ * Role for individual Account Managers. They can only reach the pages and APIs
+ * below; everything else is blocked in middleware.
+ */
+export const AM_ONLY_ROLE = 'account_manager'
+export const AM_ONLY_PAGES = ['/dashboard/account-management', '/dashboard/weekly']
+export const AM_ONLY_APIS  = ['/api/account-management', '/api/weekly']
+
 /** On the sales team but not part of the Account Management programme, so left off the AM pages. */
 export const AM_EXCLUDED_KEYS = ['Conboy, John']
 

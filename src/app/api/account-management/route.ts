@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
     .from('profiles').select('role, autotask_name').eq('id', user.id).single()
   const role      = profile?.role ?? 'read_only'
   const isManager = ['admin', 'sales_manager'].includes(role)
-  if (!isManager && role !== 'sales_rep') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!isManager && !['sales_rep', 'account_manager'].includes(role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const ownKey = profile?.autotask_name ?? null
   if (!isManager && !ownKey) {
     return NextResponse.json({ error: 'Your Autotask name is not set on your profile. Ask an admin to set it.' }, { status: 409 })

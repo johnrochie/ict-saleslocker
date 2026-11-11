@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { AM_ONLY_ROLE, AM_ONLY_PAGES, AM_ONLY_APIS } from '@/lib/config'
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -39,6 +40,26 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)
+  }
+
+  // Individual Account Managers only get the AM and Weekly Report pages
+  const path = request.nextUrl.pathname
+  const isPage = path.startsWith('/dashboard')
+  const isApi  = path.startsWith('/api')
+  if (user && (isPage || isApi)) {
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+    if (profile?.role === AM_ONLY_ROLE) {
+      const under = (base: string) => path === base || path.startsWith(base + '/')
+      if (isApi && !AM_ONLY_APIS.some(under)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+      if (isPage && !AM_ONLY_PAGES.some(under)) {
+        const url = request.nextUrl.clone()
+        url.pathname = AM_ONLY_PAGES[0]
+        url.search = ''
+        return NextResponse.redirect(url)
+      }
+    }
   }
 
   return supabaseResponse

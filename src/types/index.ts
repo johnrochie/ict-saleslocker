@@ -10,7 +10,7 @@ export type NormalisedStatus =
   | 'lost'
   | 'portal'
 
-export type UserRole = 'admin' | 'sales_manager' | 'sales_rep' | 'read_only'
+export type UserRole = 'admin' | 'sales_manager' | 'sales_rep' | 'account_manager' | 'read_only'
 
 // -- Opportunity ---------------------------------------------
 export interface Opportunity {

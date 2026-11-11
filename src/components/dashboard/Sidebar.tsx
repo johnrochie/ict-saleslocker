@@ -52,7 +52,7 @@ const navItems: NavItem[] = [
   },
   {
     label: 'Weekly Report', href: '/dashboard/weekly',
-    allowedRoles: ['admin', 'sales_manager'],
+    allowedRoles: ['admin', 'sales_manager', 'account_manager'],
     icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>,
   },
   {
@@ -82,9 +82,12 @@ const navItems: NavItem[] = [
 
 const amNavItem: NavItem = {
   label: 'Account Management', href: '/dashboard/account-management',
-  allowedRoles: ['admin', 'sales_manager', 'sales_rep'],
+  allowedRoles: ['admin', 'sales_manager', 'sales_rep', 'account_manager'],
   icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 100-8 4 4 0 000 8zm6 0a4 4 0 10-4-4" /></svg>,
 }
+
+// Individual Account Managers see only these pages (also enforced in middleware)
+const AM_ONLY_NAV = ['/dashboard/weekly']
 
 export default function Sidebar({ userEmail, userName, userRole }: { userEmail: string; userName: string; userRole: string }) {
   const pathname = usePathname()
@@ -98,7 +101,9 @@ export default function Sidebar({ userEmail, userName, userRole }: { userEmail: 
   }
 
   const initials     = userName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-  const visibleItems = navItems.filter(item => !item.allowedRoles || item.allowedRoles.includes(userRole))
+  const isAmOnly     = userRole === 'account_manager'
+  const visibleItems = navItems.filter(item =>
+    isAmOnly ? AM_ONLY_NAV.includes(item.href) : (!item.allowedRoles || item.allowedRoles.includes(userRole)))
 
   return (
     <aside className="w-60 flex flex-col bg-white border-r border-gray-200 shrink-0">
@@ -114,10 +119,12 @@ export default function Sidebar({ userEmail, userName, userRole }: { userEmail: 
 
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
         {/* My Dashboard */}
+        {!isAmOnly && (
         <div className="px-3 pb-1 pt-0.5">
           <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">My Dashboard</span>
         </div>
-        {(() => {
+        )}
+        {!isAmOnly && (() => {
           const isActive = pathname.startsWith('/dashboard/john')
           return (
             <Link href="/dashboard/john"
@@ -134,11 +141,13 @@ export default function Sidebar({ userEmail, userName, userRole }: { userEmail: 
         })()}
 
         {/* Divider */}
+        {visibleItems.length > 0 && (
         <div className="px-3 pt-3 pb-1">
           <div className="border-t border-gray-100 pt-3">
             <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">ICT SalesIQ</span>
           </div>
         </div>
+        )}
 
         {visibleItems.map(item => {
           const isActive = item.href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(item.href)
