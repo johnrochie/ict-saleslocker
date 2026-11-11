@@ -130,6 +130,9 @@ export function monthBounds(monthKey?: string): MonthBounds {
 /** Autotask "Lead Source" value the AM picks on an opportunity that came from a visit. */
 export const AM_LEAD_SOURCE = 'Account Management Visit'
 
+/** On the sales team but not part of the Account Management programme, so left off the AM pages. */
+export const AM_EXCLUDED_KEYS = ['Conboy, John']
+
 /** Autotask meeting action type that counts as an AM visit. */
 export const AM_MEETING_TYPE = 'Account Management Meeting'
 

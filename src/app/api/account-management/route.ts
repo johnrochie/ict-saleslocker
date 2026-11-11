@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
 import {
-  SALES_TEAM, monthBounds, repDisplayName, amTierConfig,
+  SALES_TEAM, AM_EXCLUDED_KEYS, monthBounds, repDisplayName, amTierConfig,
   AM_LEAD_SOURCE, AM_MEETING_TYPE, AM_DEFAULT_MONTHLY_TARGET,
 } from '@/lib/config'
 
@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
   const repKeys = new Set<string>(SALES_TEAM.map(r => r.key))
   customers.forEach(c => repKeys.add(c.account_manager))
   meetings.forEach(m => { if (m.assigned_to) repKeys.add(m.assigned_to) })
-  const visibleKeys = [...repKeys].filter(k => isManager || k === ownKey)
+  const visibleKeys = [...repKeys].filter(k => !AM_EXCLUDED_KEYS.includes(k) && (isManager || k === ownKey))
 
   const withTier = (m: Meeting) => {
     const c = custByName.get(norm(m.company))

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { formatDate } from '@/lib/utils/formatting'
 import Papa from 'papaparse'
 import { exportReviewPptx } from './exportPptx'
-import { AM_TIERS, SALES_TEAM, repDisplayName, toAutotaskName } from '@/lib/config'
+import { AM_TIERS, AM_EXCLUDED_KEYS, SALES_TEAM, repDisplayName, toAutotaskName } from '@/lib/config'
 
 // ── Types (mirror /api/account-management) ───────────────────
 export interface Meeting {
@@ -378,7 +378,7 @@ function Customers({ onChanged }: { onChanged: () => void }) {
 
   // AM choices: the sales team plus anyone already holding customers
   const amOptions = useMemo(() => {
-    const keys = new Set<string>(SALES_TEAM.map(r => r.key))
+    const keys = new Set<string>(SALES_TEAM.map(r => r.key).filter(k => !AM_EXCLUDED_KEYS.includes(k)))
     list.forEach(c => keys.add(c.account_manager))
     return [...keys].sort((a, b) => amLabel(a).localeCompare(amLabel(b)))
   }, [list])
