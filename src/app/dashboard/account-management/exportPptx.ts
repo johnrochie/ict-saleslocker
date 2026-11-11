@@ -150,7 +150,7 @@ export async function exportReviewPptx(data: Data, rep: Rep) {
   })
 
   addSection({
-    kicker: '05 · Plan', title: `Meetings planned for ${data.nextMonth.label}`,
+    kicker: '04 · Plan', title: `Meetings planned for ${data.nextMonth.label}`,
     subtitle: `${rep.nextMonthPlanned.length} planned against a target of ${num(rep.nextMonthTarget)}. All must be scheduled in Autotask.`,
     kpis: [
       { label: 'Planned', value: String(rep.nextMonthPlanned.length), sub: 'Scheduled in Autotask' },
