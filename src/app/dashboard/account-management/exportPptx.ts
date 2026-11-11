@@ -150,13 +150,6 @@ export async function exportReviewPptx(data: Data, rep: Rep) {
   })
 
   addSection({
-    kicker: '04 · Tickets', title: 'Tickets created from meetings',
-    subtitle: 'Tickets are not yet pulled from Autotask.',
-    head: [], widths: [], rows: [],
-    empty: 'To be added once tickets are linked to visits in the CRM.',
-  })
-
-  addSection({
     kicker: '05 · Plan', title: `Meetings planned for ${data.nextMonth.label}`,
     subtitle: `${rep.nextMonthPlanned.length} planned against a target of ${num(rep.nextMonthTarget)}. All must be scheduled in Autotask.`,
     kpis: [
