@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { Opportunity } from '@/types'
 import type { DealExclusion } from '@/lib/exclusions'
 import { useDealExclusions } from '@/components/dashboard/DealExclusions'
+import { exportCustomerQbrXlsx } from './exportXlsx'
 
 function euros(n: number) {
   return new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
@@ -108,9 +109,15 @@ export default function CustomerQbrClient({ all, year, exclusions }: {
           <h1 className="text-2xl font-bold text-gray-900">Customer QBR</h1>
           <p className="text-sm text-gray-500">Won spend by company and by Opportunity Category. Pick a customer to run the report on them.</p>
         </div>
-        <button onClick={() => window.print()} className="px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700">
-          Print / Save as PDF
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => exportCustomerQbrXlsx({ deals: inRange, customer, periodLabel })}
+            className="px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50">
+            Export to Excel
+          </button>
+          <button onClick={() => window.print()} className="px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+            Print / Save as PDF
+          </button>
+        </div>
       </div>
 
       {/* Controls */}
