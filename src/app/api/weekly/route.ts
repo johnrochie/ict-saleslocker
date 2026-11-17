@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
-import { RETAIL_REP_KEYS, isSalesTeamDeal, weekBounds } from '@/lib/config'
+import { isRetailRep, isSalesTeamDeal, weekBounds } from '@/lib/config'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -57,8 +57,8 @@ export async function GET(request: NextRequest) {
   const portalClosed = (closedPortalDeals || [])
     .filter(d =>
       isSalesTeamDeal(d.account_manager, d.opportunity_owner) &&
-      !RETAIL_REP_KEYS.includes(d.account_manager || '') &&
-      !RETAIL_REP_KEYS.includes(d.opportunity_owner || ''))
+      !isRetailRep(d.account_manager) &&
+      !isRetailRep(d.opportunity_owner))
     .map(d => ({ ...d, is_portal: true }))
 
   return NextResponse.json({

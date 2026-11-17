@@ -3,19 +3,19 @@
 import { useState, useEffect, useCallback } from 'react'
 import Papa from 'papaparse'
 import { formatEuro, formatCompact, formatPercent, formatDate } from '@/lib/utils/formatting'
-import { SALES_TEAM_KEYS } from '@/lib/config'
+import { SALES_TEAM_KEYS, isSalesRep, sameRep } from '@/lib/config'
 
 function repDisplay(name: string): string {
   return name.includes(',') ? name.split(',').map(s => s.trim()).reverse().join(' ') : name
 }
 function repDisplayFromDeal(am: string | null, oo: string | null): string {
   // Portal/OGP deals have "Portal, OGP" as account manager; show the sales rep on them instead.
-  const rep = SALES_TEAM_KEYS.includes(am || '') ? am : SALES_TEAM_KEYS.includes(oo || '') ? oo : (am || oo)
+  const rep = isSalesRep(am) ? am : isSalesRep(oo) ? oo : (am || oo)
   return repDisplay(rep || 'Unknown')
 }
 function dealMatchesRep(deal: { account_manager: string | null; opportunity_owner: string | null }, rep: string): boolean {
   if (rep === 'all') return true
-  return (deal.account_manager || '') === rep || (deal.opportunity_owner || '') === rep
+  return sameRep(deal.account_manager, rep) || sameRep(deal.opportunity_owner, rep)
 }
 // Autotask has this customer under both "TensorX Limited" and "Tensorix Limited".
 function isTensorX(company: string | null | undefined): boolean {

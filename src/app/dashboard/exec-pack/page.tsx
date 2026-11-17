@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { fetchAllRows } from '@/lib/supabase/pagination'
 import { loadExclusions } from '@/lib/exclusions'
-import { RETAIL_REP_KEYS, isSalesTeamDeal } from '@/lib/config'
+import { isRetailRep, isSalesTeamDeal } from '@/lib/config'
 import ExecPackClient from './ExecPackClient'
 
 export const revalidate = 0
@@ -35,8 +35,8 @@ export default async function ExecPackPage() {
       .range(from, to)
   )).filter(o =>
     isSalesTeamDeal(o.account_manager, o.opportunity_owner) &&
-    !RETAIL_REP_KEYS.includes(o.account_manager || '') &&
-    !RETAIL_REP_KEYS.includes(o.opportunity_owner || ''))
+    !isRetailRep(o.account_manager) &&
+    !isRetailRep(o.opportunity_owner))
 
   const { exclusions, canEdit, ready } = await loadExclusions(supabase)
 

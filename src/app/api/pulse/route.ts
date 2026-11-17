@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
-import { SALES_TEAM, weekBounds, currentQuarter } from '@/lib/config'
+import { SALES_TEAM, sameRep, weekBounds, currentQuarter } from '@/lib/config'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -11,8 +11,8 @@ function fmtE(n: number) {
 }
 
 function dealMatchesRep(deal: Record<string, unknown>, repKey: string): boolean {
-  return (deal.account_manager as string || '') === repKey ||
-         (deal.opportunity_owner  as string || '') === repKey
+  return sameRep(deal.account_manager as string | null, repKey) ||
+         sameRep(deal.opportunity_owner as string | null, repKey)
 }
 
 // ── types ─────────────────────────────────────────────────────────────────────

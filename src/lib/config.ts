@@ -25,14 +25,36 @@ export const SALES_TEAM_KEYS = SALES_TEAM.map(r => r.key)
 /** Retail reps — their deals are classed 'portal' and kept out of sales reporting. */
 export const RETAIL_REP_KEYS = ['Desmond, Tom', 'Ganly, Peter']
 
+/**
+ * Tidies a rep name so spacing differences don't break matching.
+ * Autotask has "Taylor , Jamie" (space before the comma) on some records,
+ * which must still match the key "Taylor, Jamie".
+ */
+export function normaliseRepName(name: string | null | undefined): string {
+  return (name ?? '').replace(/\s*,\s*/g, ', ').replace(/\s+/g, ' ').trim()
+}
+
+/** True if two Autotask rep names are the same person, ignoring stray spaces. */
+export function sameRep(a: string | null | undefined, b: string | null | undefined): boolean {
+  return normaliseRepName(a) === normaliseRepName(b)
+}
+
+/** True if the name is one of the sales team keys (spacing-tolerant). */
+export function isSalesRep(name: string | null | undefined): boolean {
+  return SALES_TEAM_KEYS.includes(normaliseRepName(name))
+}
+
+/** True if the name is one of the retail reps (spacing-tolerant). */
+export function isRetailRep(name: string | null | undefined): boolean {
+  return RETAIL_REP_KEYS.includes(normaliseRepName(name))
+}
+
 /** Returns true if the deal belongs to a member of the sales team */
 export function isSalesTeamDeal(
   accountManager: string | null,
   opportunityOwner: string | null
 ): boolean {
-  const am = accountManager || ''
-  const oo = opportunityOwner || ''
-  return SALES_TEAM_KEYS.includes(am) || SALES_TEAM_KEYS.includes(oo)
+  return isSalesRep(accountManager) || isSalesRep(opportunityOwner)
 }
 
 /** Returns the display name for a rep key (Surname, Firstname -> Firstname Surname) */
