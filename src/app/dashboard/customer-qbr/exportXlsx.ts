@@ -4,6 +4,7 @@ interface ExportArgs {
   deals: Opportunity[]          // every won deal in the date range (all customers)
   customer: string              // '' = all customers
   periodLabel: string
+  hiddenIds: Set<string>        // deals managers hid from exec reports
 }
 
 const EUR = '€#,##0;[Red]-€#,##0'
@@ -20,7 +21,7 @@ function dealDate(o: Opportunity): Date | null {
  * or company on the Deals sheet (or add/delete rows within the table range) and
  * the totals recalculate.
  */
-export async function exportCustomerQbrXlsx({ deals, customer, periodLabel }: ExportArgs) {
+export async function exportCustomerQbrXlsx({ deals, customer, periodLabel, hiddenIds }: ExportArgs) {
   const ExcelJS = (await import('exceljs')).default
   const wb = new ExcelJS.Workbook()
   wb.creator = 'ICT SalesIQ'
@@ -43,6 +44,7 @@ export async function exportCustomerQbrXlsx({ deals, customer, periodLabel }: Ex
     { header: 'Category',    key: 'category', width: 26 },
     { header: 'Closed',      key: 'closed',   width: 13 },
     { header: 'Value (€)',   key: 'value',    width: 14 },
+    { header: 'Hidden in exec reports', key: 'hidden', width: 22 },
   ]
   style(wsD)
   sorted.forEach(o => {
@@ -52,13 +54,14 @@ export async function exportCustomerQbrXlsx({ deals, customer, periodLabel }: Ex
       category: o.category || 'Uncategorised',
       closed: dealDate(o) ?? null,
       value: o.revenue_total,
+      hidden: hiddenIds.has(o.id) ? 'Yes' : '',
     })
   })
   const last = Math.max(sorted.length + 1, 2)
   wsD.getColumn('closed').numFmt = 'dd mmm yyyy'
   wsD.getColumn('value').numFmt = EUR
   wsD.views = [{ state: 'frozen', ySplit: 1 }]
-  wsD.autoFilter = { from: 'A1', to: `E${last}` }
+  wsD.autoFilter = { from: 'A1', to: `F${last}` }
 
   const rngCompany = `Deals!$A$2:$A$${last}`
   const rngCat     = `Deals!$C$2:$C$${last}`

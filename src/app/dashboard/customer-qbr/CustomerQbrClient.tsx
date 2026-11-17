@@ -36,18 +36,25 @@ export default function CustomerQbrClient({ all, year, exclusions }: {
   const [dateTo, setDateTo]     = useState(toInputDate(today))
   const [customer, setCustomer] = useState<string>('')      // '' = all customers
   const [search, setSearch]     = useState('')
+  const [includeHidden, setIncludeHidden] = useState(false)
 
-  // Won deals in the date range, minus test accounts and manager-hidden deals.
-  const inRange = useMemo(() => {
+  // Won deals in the date range, minus test accounts.
+  const candidates = useMemo(() => {
     const from = new Date(dateFrom)
     const to = new Date(dateTo); to.setHours(23, 59, 59)
     return all.filter(o => {
-      if (hidden.hiddenIds.has(o.id)) return false
       if (EXCLUDED_COMPANIES.includes((o.company || '').toLowerCase().trim())) return false
       const d = dealDate(o)
       return !!d && d >= from && d <= to
     })
-  }, [all, dateFrom, dateTo, hidden.hiddenIds])
+  }, [all, dateFrom, dateTo])
+
+  // Deals a manager hid from exec reports are left out unless the toggle is on.
+  const hiddenInRange = useMemo(() => candidates.filter(o => hidden.hiddenIds.has(o.id)), [candidates, hidden.hiddenIds])
+  const inRange = useMemo(
+    () => includeHidden ? candidates : candidates.filter(o => !hidden.hiddenIds.has(o.id)),
+    [candidates, includeHidden, hidden.hiddenIds]
+  )
 
   // Table 1: spend by company (always shows every company so you can pick one).
   const companyRows = useMemo(() => {
@@ -110,7 +117,7 @@ export default function CustomerQbrClient({ all, year, exclusions }: {
           <p className="text-sm text-gray-500">Won spend by company and by Opportunity Category. Pick a customer to run the report on them.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => exportCustomerQbrXlsx({ deals: inRange, customer, periodLabel })}
+          <button onClick={() => exportCustomerQbrXlsx({ deals: inRange, customer, periodLabel, hiddenIds: hidden.hiddenIds })}
             className="px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50">
             Export to Excel
           </button>
@@ -142,6 +149,14 @@ export default function CustomerQbrClient({ all, year, exclusions }: {
               <option key={r.name} value={r.name}>{r.name} — {euros(r.rev)}</option>
             ))}
           </select>
+        </label>
+        <label className="flex items-center gap-2 text-sm text-gray-700 pb-2"
+          title="Deals hidden from Wins Summary and Exec Pack by a manager">
+          <input type="checkbox" checked={includeHidden} onChange={e => setIncludeHidden(e.target.checked)} />
+          Include hidden deals
+          <span className="text-xs text-gray-400">
+            ({hiddenInRange.length} in range, {euros(hiddenInRange.reduce((s, o) => s + o.revenue_total, 0))})
+          </span>
         </label>
       </div>
 
@@ -246,7 +261,10 @@ export default function CustomerQbrClient({ all, year, exclusions }: {
             <tbody>
               {deals.map(o => (
                 <tr key={o.id} className="border-t border-gray-100">
-                  <td className="px-3 py-1.5">{o.opportunity_name}</td>
+                  <td className="px-3 py-1.5">
+                    {o.opportunity_name}
+                    {hidden.hiddenIds.has(o.id) && <span className="ml-2 text-xs text-amber-600">(hidden in exec reports)</span>}
+                  </td>
                   <td className="px-3 py-1.5">{o.category || 'Uncategorised'}</td>
                   <td className="px-3 py-1.5 whitespace-nowrap">{fmtDate(o.closed_date || o.created_date)}</td>
                   <td className="px-3 py-1.5 text-right">{euros(o.revenue_total)}</td>
@@ -258,7 +276,7 @@ export default function CustomerQbrClient({ all, year, exclusions }: {
       )}
 
       <p className="text-xs text-gray-400">
-        Spend = won opportunity value, not invoiced amounts. Deals are dated by close date (created date if none). Excludes test accounts, TensorX and deals hidden by managers.
+        Spend = won opportunity value, not invoiced amounts. Deals are dated by close date (created date if none). Excludes test accounts and TensorX. {includeHidden ? 'Includes' : 'Excludes'} deals hidden by managers.
       </p>
     </div>
   )
