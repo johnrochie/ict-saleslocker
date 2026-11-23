@@ -7,6 +7,10 @@
     {
       "path": "/api/bullhorn/sync",
       "schedule": "15 6 * * *"
+    },
+    {
+      "path": "/api/autotask-qpo/sync",
+      "schedule": "30 6 * * *"
     }
   ]
 }
