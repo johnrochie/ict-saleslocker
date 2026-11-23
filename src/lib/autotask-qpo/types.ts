@@ -61,6 +61,7 @@ export interface AutotaskInvoiceLite {
 }
 
 export interface ChargesSyncResult {
+  mode: 'full' | 'incremental'
   charges: number
   billing_items: number
   tickets: number
