@@ -93,6 +93,14 @@ const amNavItem: NavItem = {
 // Individual Account Managers see only these pages (also enforced in middleware)
 const AM_ONLY_NAV = ['/dashboard/weekly']
 
+// Pages hidden from the menu for now. Not deleted - remove a line to bring it back.
+const HIDDEN_NAV = [
+  '/dashboard/retail-leadership',
+  '/dashboard/po-approvals',
+  '/dashboard/recruitment',
+  '/dashboard/leadership',
+]
+
 export default function Sidebar({ userEmail, userName, userRole }: { userEmail: string; userName: string; userRole: string }) {
   const pathname = usePathname()
   const router   = useRouter()
@@ -106,7 +114,7 @@ export default function Sidebar({ userEmail, userName, userRole }: { userEmail: 
 
   const initials     = userName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
   const isAmOnly     = userRole === 'account_manager'
-  const visibleItems = navItems.filter(item =>
+  const visibleItems = navItems.filter(item => !HIDDEN_NAV.includes(item.href)).filter(item =>
     isAmOnly ? AM_ONLY_NAV.includes(item.href) : (!item.allowedRoles || item.allowedRoles.includes(userRole)))
 
   return (
