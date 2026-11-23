@@ -1,14 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
-import { isRetailRep, isSalesTeamDeal, weekBounds } from '@/lib/config'
+import { AM_ONLY_ROLE, isRetailRep, isSalesTeamDeal, sameRep, weekBounds } from '@/lib/config'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const offset   = parseInt(new URL(request.url).searchParams.get('offset') || '0')
   const admin    = createAdminSupabaseClient()
+
+  // Individual Account Managers only see their own deals and meetings
+  const { data: profile } = await admin
+    .from('profiles').select('role, autotask_name').eq('id', user.id).single()
+  const isAmOnly = profile?.role === AM_ONLY_ROLE
+  const ownKey   = profile?.autotask_name ?? null
+  if (isAmOnly && !ownKey) {
+    return NextResponse.json({ error: 'Your Autotask name is not set on your profile. Ask an admin to set it.' }, { status: 409 })
+  }
+  const mineDeal = (d: { account_manager: string | null; opportunity_owner: string | null }) =>
+    !isAmOnly || sameRep(d.account_manager, ownKey) || sameRep(d.opportunity_owner, ownKey)
+  const mineMeeting = (m: { assigned_to: string | null }) => !isAmOnly || sameRep(m.assigned_to, ownKey)
+
+  const offset   = parseInt(new URL(request.url).searchParams.get('offset') || '0')
   const lastWeek = weekBounds(-1 + offset)
   const thisWeek = weekBounds(offset)
 
@@ -57,6 +70,7 @@ export async function GET(request: NextRequest) {
   const portalClosed = (closedPortalDeals || [])
     .filter(d =>
       isSalesTeamDeal(d.account_manager, d.opportunity_owner) &&
+      mineDeal(d) &&
       !isRetailRep(d.account_manager) &&
       !isRetailRep(d.opportunity_owner))
     .map(d => ({ ...d, is_portal: true }))
@@ -64,11 +78,11 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     lastWeek,
     thisWeek,
-    closedDeals:      [...(closedDeals || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner)), ...portalClosed]
+    closedDeals:      [...(closedDeals || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner) && mineDeal(d)), ...portalClosed]
                         .sort((a, b) => (b.revenue_total ?? 0) - (a.revenue_total ?? 0)),
-    closingDeals:     (closingDeals     || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner)),
-    newEngagements:   (newEngagements   || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner)),
-    lastWeekMeetings: lastWeekMeetings  || [],
-    thisWeekMeetings: thisWeekMeetings  || [],
+    closingDeals:     (closingDeals     || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner) && mineDeal(d)),
+    newEngagements:   (newEngagements   || []).filter(d => isSalesTeamDeal(d.account_manager, d.opportunity_owner) && mineDeal(d)),
+    lastWeekMeetings: (lastWeekMeetings || []).filter(mineMeeting),
+    thisWeekMeetings: (thisWeekMeetings || []).filter(mineMeeting),
   })
 }
