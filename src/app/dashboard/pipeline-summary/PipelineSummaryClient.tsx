@@ -65,6 +65,8 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
   const [excludeTestAccounts, setExcludeTestAccounts] = useState(true)
   const [excludeTensorX,      setExcludeTensorX]      = useState(true)
   const [selectedCat, setSelectedCat] = useState<string | null>(null)
+  // Open pipeline only counts deals projected to close on/before the end of this month ('' = no limit).
+  const [closeByMonth, setCloseByMonth] = useState('')
 
   // Drop internal/test accounts and/or TensorX before anything else derives from it.
   const base = useMemo(() => {
@@ -93,10 +95,25 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
 
   // Current open pipeline — a live snapshot, deliberately NOT bound by the date range.
   // An open deal doesn't belong to a "period" until it closes, so it's always shown in full.
-  const openPipeline = useMemo(
+  const allOpen = useMemo(
     () => base.filter(o => o.normalised_status === 'pipeline' || o.normalised_status === 'on_hold'),
     [base]
   )
+  // Deals with a projected close date after the cut-off are held out; deals with no date stay in.
+  const closeCutoff = closeByMonth ? monthEnd(closeByMonth) : null
+  const isBeyondCutoff = (o: Opportunity) =>
+    !!closeCutoff && !!o.projected_close_date && new Date(o.projected_close_date) > closeCutoff
+  const openPipeline = useMemo(
+    () => allOpen.filter(o => !isBeyondCutoff(o)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allOpen, closeByMonth]
+  )
+  const deferred = useMemo(() => {
+    const d = allOpen.filter(isBeyondCutoff)
+    return { count: d.length, rev: d.reduce((s, o) => s + o.revenue_total, 0) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allOpen, closeByMonth])
+  const noDateCount = useMemo(() => openPipeline.filter(o => !o.projected_close_date).length, [openPipeline])
 
   // Period activity — Won/Lost deals closed inside the selected months
   // (falls back to created_date where no close date is recorded).
@@ -234,6 +251,13 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
             <input type="month" className="date-input" value={endMonth} min={startMonth} onChange={e => e.target.value && setEndMonth(e.target.value)} />
           </div>
 
+          {/* Projected close cut-off for the open pipeline */}
+          <div title="Only count open deals projected to close by the end of this month" style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.18)', borderRadius: 8, padding: '5px 12px' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,.4)', textTransform: 'uppercase', letterSpacing: .5 }}>Closing by</span>
+            <input type="month" className="date-input" value={closeByMonth} onChange={e => setCloseByMonth(e.target.value)} />
+            {closeByMonth && <button onClick={() => setCloseByMonth('')} style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: 14, lineHeight: 1 }} title="Clear">×</button>}
+          </div>
+
           <button onClick={() => setExcludeTestAccounts(v => !v)}
             title={TEST_COMPANIES_LABEL}
             style={{
@@ -310,7 +334,7 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
           </div>
         </div>
         <p style={{ fontSize: 11, color: '#94a3b8', margin: '0 0 24px' }}>
-          Open pipeline includes On Hold. Won and lost are deals closed {periodLabel}.{excludedNote ? ` Excludes: ${excludedNote}.` : ''} Source: ICT SalesIQ, {dateStr}.
+          Open pipeline includes On Hold.{closeCutoff ? ` Limited to deals projected to close by ${closeCutoff.toLocaleDateString('en-IE', { month: 'short', year: 'numeric' })}; ${deferred.count} deals worth ${euros(deferred.rev)} projected later are left out${noDateCount ? `, and ${noDateCount} with no projected date are included` : ''}.` : ''} Won and lost are deals closed {periodLabel}.{excludedNote ? ` Excludes: ${excludedNote}.` : ''} Source: ICT SalesIQ, {dateStr}.
         </p>
         <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: .5, textTransform: 'uppercase', color: '#475569', margin: '0 0 12px' }}>Detail: by category and stage</h2>
 
