@@ -37,11 +37,9 @@ function stageColour(name: string, idx: number): string {
   return BAR_PALETTE[idx % BAR_PALETTE.length]
 }
 
-function toMonthInput(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+function toDateInput(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
-function monthStart(m: string) { return new Date(`${m}-01T00:00:00`) }
-function monthEnd(m: string)   { const d = monthStart(m); return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59) }
 function fmtDay(d: Date) { return d.toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' }) }
 const COMMENTARY_KEY = 'pipeline-summary-commentary'
 
@@ -52,8 +50,8 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
   const hidden = useDealExclusions(exclusions)
 
   // Reporting period is monthly: pick the month the figures start from, and the month they run to.
-  const [startMonth, setStartMonth] = useState(toMonthInput(new Date(year, 0, 1)))
-  const [endMonth,   setEndMonth]   = useState(toMonthInput(today))
+  const [startDate, setStartDate] = useState(toDateInput(new Date(year, 0, 1)))
+  const [endDate,   setEndDate]   = useState(toDateInput(today))
   const [commentary, setCommentary] = useState('')
   useEffect(() => {
     try { setCommentary(localStorage.getItem(COMMENTARY_KEY) || '') } catch {}
@@ -82,16 +80,16 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
 
   // Quick-select helpers
   function setRange(from: Date, to: Date) {
-    setStartMonth(toMonthInput(from))
-    setEndMonth(toMonthInput(to))
+    setStartDate(toDateInput(from))
+    setEndDate(toDateInput(to))
   }
 
   const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1)
   const quickRanges = [
-    { label: 'This Month', from: today,                  to: today },
-    { label: 'Last Month', from: lastMonth,              to: lastMonth },
+    { label: 'This Month', from: new Date(today.getFullYear(), today.getMonth(), 1), to: today },
+    { label: 'Last Month', from: lastMonth, to: new Date(today.getFullYear(), today.getMonth(), 0) },
     { label: 'YTD',        from: new Date(year, 0, 1),   to: today },
-    { label: 'Last 12 M',  from: new Date(today.getFullYear(), today.getMonth() - 11, 1), to: today },
+    { label: 'Last 12 M',  from: new Date(today.getFullYear() - 1, today.getMonth(), today.getDate() + 1), to: today },
   ]
 
   // Current open pipeline — a live snapshot, deliberately NOT bound by the date range.
@@ -118,8 +116,8 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
 
   // Period activity — Won/Lost deals closed inside the selected months
   // (falls back to created_date where no close date is recorded).
-  const periodFrom = useMemo(() => monthStart(startMonth), [startMonth])
-  const periodTo   = useMemo(() => monthEnd(endMonth),     [endMonth])
+  const periodFrom = useMemo(() => new Date(`${startDate}T00:00:00`), [startDate])
+  const periodTo   = useMemo(() => new Date(`${endDate}T23:59:59`),   [endDate])
   const periodClosed = useMemo(() => {
     return base.filter(o => {
       if (o.normalised_status !== 'won' && o.normalised_status !== 'lost') return false
@@ -199,7 +197,7 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
   const maxChart = Math.max(...chartRows.map(r => r.rev), 1)
   const dateStr  = today.toLocaleDateString('en-IE', { day: 'numeric', month: 'long', year: 'numeric' })
   const periodLabel = `${fmtDay(periodFrom)} — ${fmtDay(periodTo)}`
-  const periodShort = `${periodFrom.toLocaleDateString('en-IE', { month: 'short', year: 'numeric' })} to ${periodTo.toLocaleDateString('en-IE', { month: 'short', year: 'numeric' })}`.toUpperCase()
+  const periodShort = `${fmtDay(periodFrom)} to ${fmtDay(periodTo)}`.toUpperCase()
   const excludedNote = [
     excludeTestAccounts ? TEST_COMPANIES_RAW.join(', ') : '',
     excludeTensorX ? TENSORX_COMPANIES_RAW.join(', ') : '',
@@ -237,7 +235,7 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
           <div style={{ display: 'flex', gap: 5 }}>
             {quickRanges.map(r => (
               <button key={r.label} className="qbtn"
-                style={{ opacity: startMonth === toMonthInput(r.from) && endMonth === toMonthInput(r.to) ? 1 : 0.65 }}
+                style={{ opacity: startDate === toDateInput(r.from) && endDate === toDateInput(r.to) ? 1 : 0.65 }}
                 onClick={() => setRange(r.from, r.to)}>
                 {r.label}
               </button>
@@ -247,9 +245,9 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
           {/* Custom date range */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.18)', borderRadius: 8, padding: '5px 12px' }}>
             <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,.4)', textTransform: 'uppercase', letterSpacing: .5 }}>From</span>
-            <input type="month" className="date-input" value={startMonth} max={endMonth} onChange={e => e.target.value && setStartMonth(e.target.value)} />
+            <input type="date" className="date-input" value={startDate} max={endDate} onChange={e => e.target.value && setStartDate(e.target.value)} />
             <span style={{ color: 'rgba(255,255,255,.3)' }}>→</span>
-            <input type="month" className="date-input" value={endMonth} min={startMonth} onChange={e => e.target.value && setEndMonth(e.target.value)} />
+            <input type="date" className="date-input" value={endDate} min={startDate} onChange={e => e.target.value && setEndDate(e.target.value)} />
           </div>
 
           {/* Projected close cut-off for the open pipeline */}
