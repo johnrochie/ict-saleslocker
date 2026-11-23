@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Opportunity } from '@/types'
 import type { DealExclusion } from '@/lib/exclusions'
 import { useDealExclusions, HideDealButton, HideDealDialog, HiddenDealsPanel } from '@/components/dashboard/DealExclusions'
@@ -37,9 +37,13 @@ function stageColour(name: string, idx: number): string {
   return BAR_PALETTE[idx % BAR_PALETTE.length]
 }
 
-function toInputDate(d: Date) {
-  return d.toISOString().split('T')[0]
+function toMonthInput(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
+function monthStart(m: string) { return new Date(`${m}-01T00:00:00`) }
+function monthEnd(m: string)   { const d = monthStart(m); return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59) }
+function fmtDay(d: Date) { return d.toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' }) }
+const COMMENTARY_KEY = 'pipeline-summary-commentary'
 
 export default function PipelineSummaryClient({ all, year, exclusions, canEdit, exclusionsReady }: {
   all: Opportunity[]; year: number; exclusions: DealExclusion[]; canEdit: boolean; exclusionsReady: boolean
@@ -47,8 +51,17 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
   const today = new Date()
   const hidden = useDealExclusions(exclusions)
 
-  const [dateFrom, setDateFrom] = useState(toInputDate(new Date(year, 0, 1)))
-  const [dateTo,   setDateTo]   = useState(toInputDate(new Date(year, 11, 31)))
+  // Reporting period is monthly: pick the month the figures start from, and the month they run to.
+  const [startMonth, setStartMonth] = useState(toMonthInput(new Date(year, 0, 1)))
+  const [endMonth,   setEndMonth]   = useState(toMonthInput(today))
+  const [commentary, setCommentary] = useState('')
+  useEffect(() => {
+    try { setCommentary(localStorage.getItem(COMMENTARY_KEY) || '') } catch {}
+  }, [])
+  function updateCommentary(v: string) {
+    setCommentary(v)
+    try { localStorage.setItem(COMMENTARY_KEY, v) } catch {}
+  }
   const [excludeTestAccounts, setExcludeTestAccounts] = useState(true)
   const [excludeTensorX,      setExcludeTensorX]      = useState(true)
   const [selectedCat, setSelectedCat] = useState<string | null>(null)
@@ -66,15 +79,16 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
 
   // Quick-select helpers
   function setRange(from: Date, to: Date) {
-    setDateFrom(toInputDate(from))
-    setDateTo(toInputDate(to))
+    setStartMonth(toMonthInput(from))
+    setEndMonth(toMonthInput(to))
   }
 
+  const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1)
   const quickRanges = [
-    { label: 'This Year', from: new Date(year, 0, 1),     to: new Date(year, 11, 31) },
-    { label: 'Last Year', from: new Date(year-1, 0, 1),   to: new Date(year-1, 11, 31) },
-    { label: '2 Yrs',     from: new Date(year-2, 0, 1),   to: new Date(year, 11, 31) },
-    { label: 'All Time',  from: new Date(2018, 0, 1),      to: new Date(year+1, 11, 31) },
+    { label: 'This Month', from: today,                  to: today },
+    { label: 'Last Month', from: lastMonth,              to: lastMonth },
+    { label: 'YTD',        from: new Date(year, 0, 1),   to: today },
+    { label: 'Last 12 M',  from: new Date(today.getFullYear(), today.getMonth() - 11, 1), to: today },
   ]
 
   // Current open pipeline — a live snapshot, deliberately NOT bound by the date range.
@@ -84,17 +98,19 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
     [base]
   )
 
-  // Period activity — Won/Lost deals whose created_date falls inside the selected range.
+  // Period activity — Won/Lost deals closed inside the selected months
+  // (falls back to created_date where no close date is recorded).
+  const periodFrom = useMemo(() => monthStart(startMonth), [startMonth])
+  const periodTo   = useMemo(() => monthEnd(endMonth),     [endMonth])
   const periodClosed = useMemo(() => {
-    const from = new Date(dateFrom)
-    const to   = new Date(dateTo); to.setHours(23, 59, 59)
     return base.filter(o => {
       if (o.normalised_status !== 'won' && o.normalised_status !== 'lost') return false
-      const d = o.created_date ? new Date(o.created_date) : null
+      const raw = o.closed_date || o.created_date
+      const d = raw ? new Date(raw) : null
       if (!d) return false
-      return d >= from && d <= to
+      return d >= periodFrom && d <= periodTo
     })
-  }, [base, dateFrom, dateTo])
+  }, [base, periodFrom, periodTo])
 
   const metrics = useMemo(() => {
     const pipeline = openPipeline.filter(o => o.normalised_status === 'pipeline')
@@ -164,12 +180,17 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
 
   const maxChart = Math.max(...chartRows.map(r => r.rev), 1)
   const dateStr  = today.toLocaleDateString('en-IE', { day: 'numeric', month: 'long', year: 'numeric' })
-  const periodLabel = `${new Date(dateFrom).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })} — ${new Date(dateTo).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}`
+  const periodLabel = `${fmtDay(periodFrom)} — ${fmtDay(periodTo)}`
+  const periodShort = `${periodFrom.toLocaleDateString('en-IE', { month: 'short', year: 'numeric' })} to ${periodTo.toLocaleDateString('en-IE', { month: 'short', year: 'numeric' })}`.toUpperCase()
+  const excludedNote = [
+    excludeTestAccounts ? TEST_COMPANIES_RAW.join(', ') : '',
+    excludeTensorX ? TENSORX_COMPANIES_RAW.join(', ') : '',
+  ].filter(Boolean).join(', ')
 
   return (
     <div style={{ fontFamily: "'Arial', sans-serif", fontSize: 13, color: '#1e293b', background: '#f1f5f9', minHeight: '100vh', margin: -24 }}>
       <style>{`
-        @media print { .no-print { display: none !important; } .ps-wrap { background: white !important; } }
+        @media print { .no-print { display: none !important; } .print-only { display: block !important; } .ps-wrap { background: white !important; } }
         .ps-table th, .ps-table td { padding: 7px 12px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 12px; }
         .ps-table th { background: #f8fafc; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; }
         .ps-table tr:last-child td { border-bottom: none; }
@@ -185,7 +206,7 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
       <div style={{ background: 'linear-gradient(135deg,#1A3A5C 0%,#142d47 100%)', color: 'white', padding: '12px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 17, fontWeight: 800, letterSpacing: -.3 }}>
-            ICT Services &nbsp;—&nbsp; <span style={{ color: '#93c5fd' }}>Sales Pipeline Summary</span>
+            ICT Services &nbsp;—&nbsp; <span style={{ color: '#93c5fd' }}>Monthly Business Performance Review</span>
           </h1>
           <p style={{ margin: '2px 0 0', fontSize: 11, color: 'rgba(255,255,255,.45)' }}>
             {metrics.openCount} open now &nbsp;·&nbsp; {metrics.wonCount + metrics.lostCount} closed {periodLabel}
@@ -198,7 +219,7 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
           <div style={{ display: 'flex', gap: 5 }}>
             {quickRanges.map(r => (
               <button key={r.label} className="qbtn"
-                style={{ opacity: dateFrom === toInputDate(r.from) && dateTo === toInputDate(r.to) ? 1 : 0.65 }}
+                style={{ opacity: startMonth === toMonthInput(r.from) && endMonth === toMonthInput(r.to) ? 1 : 0.65 }}
                 onClick={() => setRange(r.from, r.to)}>
                 {r.label}
               </button>
@@ -208,9 +229,9 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
           {/* Custom date range */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.18)', borderRadius: 8, padding: '5px 12px' }}>
             <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,.4)', textTransform: 'uppercase', letterSpacing: .5 }}>From</span>
-            <input type="date" className="date-input" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+            <input type="month" className="date-input" value={startMonth} max={endMonth} onChange={e => e.target.value && setStartMonth(e.target.value)} />
             <span style={{ color: 'rgba(255,255,255,.3)' }}>→</span>
-            <input type="date" className="date-input" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+            <input type="month" className="date-input" value={endMonth} min={startMonth} onChange={e => e.target.value && setEndMonth(e.target.value)} />
           </div>
 
           <button onClick={() => setExcludeTestAccounts(v => !v)}
@@ -244,12 +265,55 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
 
       {/* Sub-header */}
       <div style={{ background: '#1e3a5f', color: 'white', padding: '7px 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase' }}>Current Open Pipeline — By Stage &amp; Category</span>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase' }}>Commercial — ICT Sales and Pipeline</span>
         <span style={{ fontSize: 11, color: 'rgba(255,255,255,.6)' }}>{dateStr}</span>
       </div>
 
       <div className="ps-wrap" style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 28px' }}>
         <div style={{ marginBottom: 16 }}><HiddenDealsPanel state={hidden} canEdit={canEdit} ready={exclusionsReady} scope={s => s === 'pipeline' || s === 'on_hold'} /></div>
+        {/* LEADERSHIP SUMMARY: mirrors the headings on the leadership slide */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20 }}>
+          {[
+            { label: 'Open pipeline', val: euros(metrics.openRev), sub: `${metrics.openCount.toLocaleString('en-IE')} opportunities, average ${euros(metrics.avgOpenDeal)}`, color: '#1e293b' },
+            { label: `Won, ${periodShort}`, val: euros(metrics.wonRev), sub: `${metrics.wonCount} deals`, color: '#16a34a' },
+            { label: 'Lost, same period', val: euros(metrics.lostRev), sub: `${metrics.lostCount} deals`, color: '#dc2626' },
+          ].map(k => (
+            <div key={k.label} style={{ background: 'white', borderRadius: 10, border: '1px solid #e2e8f0', padding: '14px 18px' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase', color: '#64748b' }}>{k.label}</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: k.color, margin: '4px 0', fontVariantNumeric: 'tabular-nums' }}>{k.val}</div>
+              <div style={{ fontSize: 12, color: '#64748b' }}>{k.sub}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 8 }}>
+          <div style={{ background: 'white', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+            <div style={{ background: '#1e3a5f', color: 'white', padding: '8px 14px', fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase' }}>Open pipeline by stage</div>
+            <table className="ps-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <tbody>
+                {stageRows.map(row => (
+                  <tr key={row.name}>
+                    <td style={{ color: row.status === 'on_hold' ? '#d97706' : '#1e293b' }}>{row.name}</td>
+                    <td className="r" style={{ fontWeight: 700 }}>{euros(row.rev)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ background: 'white', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ background: '#1e3a5f', color: 'white', padding: '8px 14px', fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase' }}>Commentary</div>
+            <textarea className="no-print" value={commentary} onChange={e => updateCommentary(e.target.value)}
+              placeholder="One point per line. Saved in this browser."
+              style={{ flex: 1, minHeight: 140, border: 'none', outline: 'none', resize: 'vertical', padding: '12px 14px', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.5 }} />
+            <ul className="print-only" style={{ display: 'none', margin: 0, padding: '12px 14px 12px 30px' }}>
+              {commentary.split('\n').filter(l => l.trim()).map((l, i) => <li key={i}>{l}</li>)}
+            </ul>
+          </div>
+        </div>
+        <p style={{ fontSize: 11, color: '#94a3b8', margin: '0 0 24px' }}>
+          Open pipeline includes On Hold. Won and lost are deals closed {periodLabel}.{excludedNote ? ` Excludes: ${excludedNote}.` : ''} Source: ICT SalesIQ, {dateStr}.
+        </p>
+        <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: .5, textTransform: 'uppercase', color: '#475569', margin: '0 0 12px' }}>Detail: by category and stage</h2>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
 
           {/* KEY METRICS */}
