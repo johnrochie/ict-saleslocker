@@ -17,10 +17,12 @@ export async function GET(request: NextRequest) {
   if (!cronSecret || request.headers.get('Authorization') !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
   }
-  return runSync('cron')
+  return runSync('cron', false)
 }
 
-export async function POST() {
+// POST /api/autotask-qpo/sync          -> incremental (full if none has completed yet)
+// POST /api/autotask-qpo/sync?full=1   -> force a full re-pull
+export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -31,7 +33,8 @@ export async function POST() {
     if (!profile || !['admin', 'sales_manager'].includes(profile.role)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
-    return await runSync(user.email ?? user.id)
+    const forceFull = new URL(request.url).searchParams.get('full') === '1'
+    return await runSync(user.email ?? user.id, forceFull)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Sync request failed'
     console.error('[api/autotask-qpo/sync] Auth/setup error:', message)
@@ -39,7 +42,7 @@ export async function POST() {
   }
 }
 
-async function runSync(triggeredBy: string) {
+async function runSync(triggeredBy: string, forceFull: boolean) {
   if (!AutotaskClient.isConfigured()) {
     return NextResponse.json(
       { error: 'Autotask not configured.', hint: 'Set AUTOTASK_USERNAME, AUTOTASK_SECRET, AUTOTASK_INTEGRATION_CODE.' },
@@ -47,7 +50,7 @@ async function runSync(triggeredBy: string) {
     )
   }
   try {
-    return NextResponse.json(await syncCharges(triggeredBy))
+    return NextResponse.json(await syncCharges(triggeredBy, { forceFull }))
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Sync failed'
     console.error('[api/autotask-qpo/sync] Error:', message)

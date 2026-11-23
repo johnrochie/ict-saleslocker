@@ -3,10 +3,17 @@
 // Read-only against Autotask. Writes only to autotask_* tables.
 // Reuses AutotaskClient but nothing else from src/lib/autotask/.
 //
-// Not yet validated against the live instance (see spec section 8).
-// Window filters are tried first and fall back to an unfiltered
-// pull if Autotask rejects the field name, so a wrong field guess
-// costs time, not a failed sync.
+// Two modes:
+//  - full        : first run, or forced. Pulls charges/billing items
+//                  from 1 Jan of (this year - AUTOTASK_QPO_WINDOW_YEARS).
+//  - incremental : every run after a successful full one. Pulls only
+//                  rows created/changed in the last
+//                  AUTOTASK_QPO_LOOKBACK_DAYS (default 45), so legacy
+//                  data isn't re-fetched. The lookback overlaps the
+//                  daily cron on purpose, so a missed run self-heals.
+//
+// Field names follow the spec and are validated by use: the full run
+// worked against the live instance on first deploy.
 // ============================================================
 
 import { AutotaskClient, FILTER_ALL } from '@/lib/autotask/client'
@@ -22,14 +29,14 @@ import type {
 export const QPO_LOG_FILE = 'autotask-charges'
 
 const BATCH_SIZE = 500
-const ID_CHUNK   = 200   // ids per "in" filter when fetching referenced tickets/invoices
+const ID_CHUNK   = 200   // ids per "in" filter when fetching referenced rows
 
-// Rolling window: charges / billing items from 1 Jan of (this year - N).
-// Default 1 = this year plus last year, enough for YTD and year-on-year.
-const WINDOW_YEARS = Number(process.env.AUTOTASK_QPO_WINDOW_YEARS ?? 1)
+const WINDOW_YEARS  = Number(process.env.AUTOTASK_QPO_WINDOW_YEARS ?? 1)
+const LOOKBACK_DAYS = Number(process.env.AUTOTASK_QPO_LOOKBACK_DAYS ?? 45)
 
-type Admin = ReturnType<typeof createAdminSupabaseClient>
+type Admin  = ReturnType<typeof createAdminSupabaseClient>
 type Errors = ChargesSyncResult['errors']
+type Mode   = ChargesSyncResult['mode']
 
 async function upsertBatches(
   admin: Admin, table: string, rows: Record<string, unknown>[], errors: Errors,
@@ -49,8 +56,29 @@ async function upsertBatches(
   return done
 }
 
-// Try a windowed query; if Autotask rejects the filter field, fall back to
-// the unwindowed filter rather than failing the whole sync.
+function msg(err: unknown) {
+  return err instanceof Error ? err.message.slice(0, 160) : String(err)
+}
+
+// Run one or more filters against an entity and merge the results by id.
+// Used for incremental mode, where "new OR changed" is expressed as separate
+// queries rather than an untested nested OR filter.
+async function queryUnion<T extends { id?: number }>(
+  client: AutotaskClient, entity: string, filters: unknown[][], errors: Errors,
+): Promise<T[]> {
+  const byId = new Map<number, T>()
+  for (const f of filters) {
+    try {
+      const rows = await client.queryAll<T>(entity, f)
+      rows.forEach(r => { if (r.id != null) byId.set(r.id, r) })
+    } catch (err) {
+      errors.push({ row: 0, message: `${entity}: query failed (${msg(err)})` })
+    }
+  }
+  return Array.from(byId.values())
+}
+
+// Full mode: windowed query, falling back to unfiltered if Autotask rejects the field.
 async function queryWithFallback<T extends { id?: number }>(
   client: AutotaskClient, entity: string,
   windowed: unknown[], fallback: unknown[], errors: Errors,
@@ -58,10 +86,7 @@ async function queryWithFallback<T extends { id?: number }>(
   try {
     return await client.queryAll<T>(entity, windowed)
   } catch (err) {
-    errors.push({
-      row: 0,
-      message: `${entity}: windowed query failed, fetched unfiltered instead (${err instanceof Error ? err.message.slice(0, 160) : err})`,
-    })
+    errors.push({ row: 0, message: `${entity}: windowed query failed, fetched unfiltered instead (${msg(err)})` })
     return await client.queryAll<T>(entity, fallback)
   }
 }
@@ -72,42 +97,70 @@ async function fetchByIds<T extends { id?: number }>(
   const out: T[] = []
   for (let i = 0; i < ids.length; i += ID_CHUNK) {
     const chunk = ids.slice(i, i + ID_CHUNK)
-    const rows = await client.queryAll<T>(entity, [{ op: 'in', field: 'id', value: chunk }])
-    out.push(...rows)
+    out.push(...await client.queryAll<T>(entity, [{ op: 'in', field: 'id', value: chunk }]))
   }
   return out
 }
 
-export async function syncCharges(triggeredBy: string): Promise<ChargesSyncResult> {
+// A full run is needed until one has completed cleanly. 'partial' and
+// 'failed' runs don't count, so a bad first run is retried in full.
+async function hasCompletedFullRun(admin: Admin): Promise<boolean> {
+  const { data } = await admin
+    .from('import_logs')
+    .select('id')
+    .eq('filename', QPO_LOG_FILE)
+    .eq('status', 'success')
+    .limit(1)
+    .maybeSingle()
+  return !!data
+}
+
+export async function syncCharges(triggeredBy: string, opts: { forceFull?: boolean } = {}): Promise<ChargesSyncResult> {
   const startMs = Date.now()
   const client  = new AutotaskClient()
   const admin   = createAdminSupabaseClient()
   const errors: Errors = []
 
-  const since = new Date(Date.UTC(new Date().getUTCFullYear() - WINDOW_YEARS, 0, 1)).toISOString()
-  console.log(`[autotask-qpo/sync] starting. since=${since} triggeredBy=${triggeredBy}`)
+  const mode: Mode = opts.forceFull || !(await hasCompletedFullRun(admin)) ? 'full' : 'incremental'
 
-  // ── 1. Charges + billing items (independent fetches) ─────────
-  const [charges, billingItems, companies] = await Promise.all([
-    queryWithFallback<AutotaskTicketCharge>(
-      client, 'TicketCharges',
-      [{ op: 'gte', field: 'createDate', value: since }],
-      FILTER_ALL, errors,
-    ),
-    queryWithFallback<AutotaskBillingItem>(
-      client, 'BillingItems',
-      [{ op: 'exist', field: 'ticketChargeID' }, { op: 'gte', field: 'itemDate', value: since }],
-      [{ op: 'exist', field: 'ticketChargeID' }], errors,
-    ),
-    client.queryAll<{ id: number; companyName: string }>('Companies', FILTER_ALL)
-      .catch(err => {
-        errors.push({ row: 0, message: `Companies: ${err instanceof Error ? err.message.slice(0, 160) : err}` })
-        return [] as Array<{ id: number; companyName: string }>
-      }),
-  ])
-  console.log(`[autotask-qpo/sync] fetched ${charges.length} charges, ${billingItems.length} billing items, ${companies.length} companies`)
+  const fullSince = new Date(Date.UTC(new Date().getUTCFullYear() - WINDOW_YEARS, 0, 1)).toISOString()
+  const recentSince = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString()
+  const since = mode === 'full' ? fullSince : recentSince
+  console.log(`[autotask-qpo/sync] starting ${mode}. since=${since} triggeredBy=${triggeredBy}`)
 
-  const companyNames = new Map(companies.map(c => [c.id, c.companyName]))
+  // ── 1. Charges + billing items ───────────────────────────────
+  let charges: AutotaskTicketCharge[]
+  let billingItems: AutotaskBillingItem[]
+
+  if (mode === 'full') {
+    ;[charges, billingItems] = await Promise.all([
+      queryWithFallback<AutotaskTicketCharge>(
+        client, 'TicketCharges',
+        [{ op: 'gte', field: 'createDate', value: since }],
+        FILTER_ALL, errors,
+      ),
+      queryWithFallback<AutotaskBillingItem>(
+        client, 'BillingItems',
+        [{ op: 'exist', field: 'ticketChargeID' }, { op: 'gte', field: 'itemDate', value: since }],
+        [{ op: 'exist', field: 'ticketChargeID' }], errors,
+      ),
+    ])
+  } else {
+    // New charges, charges whose cost status moved, billing items dated
+    // recently, and billing items posted (invoiced) recently — the last one
+    // catches old charges that were only just invoiced.
+    ;[charges, billingItems] = await Promise.all([
+      queryUnion<AutotaskTicketCharge>(client, 'TicketCharges', [
+        [{ op: 'gte', field: 'createDate', value: since }],
+        [{ op: 'gte', field: 'statusLastModifiedDate', value: since }],
+      ], errors),
+      queryUnion<AutotaskBillingItem>(client, 'BillingItems', [
+        [{ op: 'exist', field: 'ticketChargeID' }, { op: 'gte', field: 'itemDate', value: since }],
+        [{ op: 'exist', field: 'ticketChargeID' }, { op: 'gte', field: 'postedDate', value: since }],
+      ], errors),
+    ])
+  }
+  console.log(`[autotask-qpo/sync] fetched ${charges.length} charges, ${billingItems.length} billing items`)
 
   // ── 2. Only the tickets and invoices these rows point at ─────
   const ticketIds  = [...new Set([
@@ -119,15 +172,26 @@ export async function syncCharges(triggeredBy: string): Promise<ChargesSyncResul
 
   const [tickets, invoices] = await Promise.all([
     fetchByIds<AutotaskTicketLite>(client, 'Tickets', ticketIds).catch(err => {
-      errors.push({ row: 0, message: `Tickets: ${err instanceof Error ? err.message.slice(0, 160) : err}` })
+      errors.push({ row: 0, message: `Tickets: ${msg(err)}` })
       return [] as AutotaskTicketLite[]
     }),
     fetchByIds<AutotaskInvoiceLite>(client, 'Invoices', invoiceIds).catch(err => {
-      errors.push({ row: 0, message: `Invoices: ${err instanceof Error ? err.message.slice(0, 160) : err}` })
+      errors.push({ row: 0, message: `Invoices: ${msg(err)}` })
       return [] as AutotaskInvoiceLite[]
     }),
   ])
-  console.log(`[autotask-qpo/sync] fetched ${tickets.length} tickets, ${invoices.length} invoices`)
+
+  // Company names: only the companies these tickets belong to, not the whole table.
+  const companyIds = [...new Set(tickets
+    .map(t => t.companyID ?? t.accountID)
+    .filter((n): n is number => typeof n === 'number'))]
+  const companies = await fetchByIds<{ id: number; companyName: string }>(client, 'Companies', companyIds)
+    .catch(err => {
+      errors.push({ row: 0, message: `Companies: ${msg(err)}` })
+      return [] as Array<{ id: number; companyName: string }>
+    })
+  const companyNames = new Map(companies.map(c => [c.id, c.companyName]))
+  console.log(`[autotask-qpo/sync] fetched ${tickets.length} tickets, ${invoices.length} invoices, ${companies.length} companies`)
 
   // ── 3. Write ─────────────────────────────────────────────────
   const tCount = await upsertBatches(admin, 'autotask_tickets_lite',
@@ -156,6 +220,7 @@ export async function syncCharges(triggeredBy: string): Promise<ChargesSyncResul
   })
 
   return {
+    mode,
     charges: cCount, billing_items: bCount, tickets: tCount, invoices: iCount,
     errors, status, window_since: since, duration_ms: Date.now() - startMs,
   }

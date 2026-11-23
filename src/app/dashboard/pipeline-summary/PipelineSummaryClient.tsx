@@ -65,8 +65,9 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
   const [excludeTestAccounts, setExcludeTestAccounts] = useState(true)
   const [excludeTensorX,      setExcludeTensorX]      = useState(true)
   const [selectedCat, setSelectedCat] = useState<string | null>(null)
-  // Open pipeline only counts deals projected to close on/before the end of this month ('' = no limit).
-  const [closeByMonth, setCloseByMonth] = useState('')
+  const [hideOnHold, setHideOnHold] = useState(true)
+  // Open pipeline only counts deals projected to close on/before this date ('' = no limit).
+  const [closeByDate, setCloseByDate] = useState('')
 
   // Drop internal/test accounts and/or TensorX before anything else derives from it.
   const base = useMemo(() => {
@@ -96,23 +97,23 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
   // Current open pipeline — a live snapshot, deliberately NOT bound by the date range.
   // An open deal doesn't belong to a "period" until it closes, so it's always shown in full.
   const allOpen = useMemo(
-    () => base.filter(o => o.normalised_status === 'pipeline' || o.normalised_status === 'on_hold'),
-    [base]
+    () => base.filter(o => o.normalised_status === 'pipeline' || (!hideOnHold && o.normalised_status === 'on_hold')),
+    [base, hideOnHold]
   )
   // Deals with a projected close date after the cut-off are held out; deals with no date stay in.
-  const closeCutoff = closeByMonth ? monthEnd(closeByMonth) : null
+  const closeCutoff = closeByDate ? new Date(`${closeByDate}T23:59:59`) : null
   const isBeyondCutoff = (o: Opportunity) =>
     !!closeCutoff && !!o.projected_close_date && new Date(o.projected_close_date) > closeCutoff
   const openPipeline = useMemo(
     () => allOpen.filter(o => !isBeyondCutoff(o)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allOpen, closeByMonth]
+    [allOpen, closeByDate]
   )
   const deferred = useMemo(() => {
     const d = allOpen.filter(isBeyondCutoff)
     return { count: d.length, rev: d.reduce((s, o) => s + o.revenue_total, 0) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allOpen, closeByMonth])
+  }, [allOpen, closeByDate])
   const noDateCount = useMemo(() => openPipeline.filter(o => !o.projected_close_date).length, [openPipeline])
 
   // Period activity — Won/Lost deals closed inside the selected months
@@ -252,10 +253,10 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
           </div>
 
           {/* Projected close cut-off for the open pipeline */}
-          <div title="Only count open deals projected to close by the end of this month" style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.18)', borderRadius: 8, padding: '5px 12px' }}>
+          <div title="Only count open deals projected to close on or before this date" style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.18)', borderRadius: 8, padding: '5px 12px' }}>
             <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,.4)', textTransform: 'uppercase', letterSpacing: .5 }}>Closing by</span>
-            <input type="month" className="date-input" value={closeByMonth} onChange={e => setCloseByMonth(e.target.value)} />
-            {closeByMonth && <button onClick={() => setCloseByMonth('')} style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: 14, lineHeight: 1 }} title="Clear">×</button>}
+            <input type="date" className="date-input" value={closeByDate} onChange={e => setCloseByDate(e.target.value)} />
+            {closeByDate && <button onClick={() => setCloseByDate('')} style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: 14, lineHeight: 1 }} title="Clear">×</button>}
           </div>
 
           <button onClick={() => setExcludeTestAccounts(v => !v)}
@@ -278,6 +279,17 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
               color: 'white',
             }}>
             {excludeTensorX ? '✓ ' : ''}Hide TensorX
+          </button>
+
+          <button onClick={() => setHideOnHold(v => !v)}
+            title="Leave On Hold deals out of the open pipeline"
+            style={{
+              padding: '6px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              border: hideOnHold ? '1px solid #93c5fd' : '1px solid rgba(255,255,255,.25)',
+              background: hideOnHold ? 'rgba(59,130,246,.35)' : 'rgba(255,255,255,.1)',
+              color: 'white',
+            }}>
+            {hideOnHold ? '✓ ' : ''}Hide On Hold
           </button>
 
           <button onClick={() => window.print()}
@@ -334,7 +346,7 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
           </div>
         </div>
         <p style={{ fontSize: 11, color: '#94a3b8', margin: '0 0 24px' }}>
-          Open pipeline includes On Hold.{closeCutoff ? ` Limited to deals projected to close by ${closeCutoff.toLocaleDateString('en-IE', { month: 'short', year: 'numeric' })}; ${deferred.count} deals worth ${euros(deferred.rev)} projected later are left out${noDateCount ? `, and ${noDateCount} with no projected date are included` : ''}.` : ''} Won and lost are deals closed {periodLabel}.{excludedNote ? ` Excludes: ${excludedNote}.` : ''} Source: ICT SalesIQ, {dateStr}.
+          Open pipeline {hideOnHold ? 'excludes' : 'includes'} On Hold.{closeCutoff ? ` Limited to deals projected to close by ${fmtDay(closeCutoff)}; ${deferred.count} deals worth ${euros(deferred.rev)} projected later are left out${noDateCount ? `, and ${noDateCount} with no projected date are included` : ''}.` : ''} Won and lost are deals closed {periodLabel}.{excludedNote ? ` Excludes: ${excludedNote}.` : ''} Source: ICT SalesIQ, {dateStr}.
         </p>
         <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: .5, textTransform: 'uppercase', color: '#475569', margin: '0 0 12px' }}>Detail: by category and stage</h2>
 
@@ -353,7 +365,7 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
                   { label: 'Total open pipeline value',       val: euros(metrics.openRev),                                       bold: true  },
                   { label: 'Avg open deal size',              val: euros(metrics.avgOpenDeal),                                   bold: false },
                   { label: 'Active pipeline',                val: `${metrics.pipeCount} / ${euros(metrics.pipeRev)}`,            bold: false },
-                  { label: 'On hold',                        val: `${metrics.onHoldCount} / ${euros(metrics.onHoldRev)}`,        bold: false, color: '#d97706' },
+                  ...(hideOnHold ? [] : [{ label: 'On hold', val: `${metrics.onHoldCount} / ${euros(metrics.onHoldRev)}`, bold: false, color: '#d97706' }]),
                 ].map(row => (
                   <tr key={row.label}>
                     <td style={{ color: '#475569' }}>{row.label}</td>
