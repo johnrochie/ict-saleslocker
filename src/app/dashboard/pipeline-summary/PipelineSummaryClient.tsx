@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Opportunity } from '@/types'
 import type { DealExclusion } from '@/lib/exclusions'
+import DealDetail from './DealDetail'
 import { useDealExclusions, HideDealButton, HideDealDialog, HiddenDealsPanel } from '@/components/dashboard/DealExclusions'
 
 function euros(n: number) {
@@ -470,6 +471,19 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
             </div>
           </div>
         </div>
+
+        <DealDetail
+          won={periodClosed.filter(o => o.normalised_status === 'won')}
+          lost={periodClosed.filter(o => o.normalised_status === 'lost')}
+          open={openPipeline}
+          periodLabel={periodLabel}
+          filterNote={[
+            hideOnHold ? 'On Hold excluded' : 'On Hold included',
+            closeCutoff ? `Open deals projected to close by ${fmtDay(closeCutoff)}` : 'No projected close limit',
+            excludedNote ? `Excludes: ${excludedNote}` : 'No company exclusions',
+            'Hidden deals removed',
+          ].join('. ')}
+        />
       </div>
 
       <div style={{ textAlign: 'center', padding: '12px 0 20px', color: '#94a3b8', fontSize: 11, borderTop: '1px solid #e2e8f0', marginTop: 8 }}>
