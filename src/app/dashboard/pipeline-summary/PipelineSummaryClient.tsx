@@ -31,10 +31,6 @@ function effectiveCategory(o: Opportunity): string {
   return o.category || 'Uncategorised'
 }
 
-function wonCategory(o: Opportunity): string {
-  return o.category || 'Uncategorised'
-}
-
 function stageColour(name: string, idx: number): string {
   const l = name.toLowerCase()
   if (l.includes('won') || l === 'win') return '#16a34a'
@@ -357,14 +353,6 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
           categoryOf={effectiveCategory}
           hide={canEdit && exclusionsReady ? hidden : null}
           footnote={`Open pipeline ${hideOnHold ? 'excludes' : 'includes'} On Hold${closeCutoff ? `; deals projected to close by ${fmtDay(closeCutoff)}` : ''}${excludedNote ? `. Excludes: ${excludedNote}` : ''}. Source: ICT SalesIQ, ${dateStr}.`}
-        />
-
-        <PipelineBreakdown
-          mode="won"
-          deals={periodClosed.filter(o => o.normalised_status === 'won')}
-          categoryOf={wonCategory}
-          hide={canEdit && exclusionsReady ? hidden : null}
-          footnote={`Wins closed ${periodLabel}${excludedNote ? `. Excludes: ${excludedNote}` : ''}. Source: ICT SalesIQ, ${dateStr}.`}
         />
 
         <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: .5, textTransform: 'uppercase', color: '#475569', margin: '24px 0 12px' }}>Detail: by category and stage</h2>

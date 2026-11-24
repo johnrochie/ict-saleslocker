@@ -4,6 +4,11 @@ import { useMemo, useState } from 'react'
 import { Opportunity } from '@/types'
 import type { DealExclusion } from '@/lib/exclusions'
 import { useDealExclusions, HideDealButton, HideDealDialog, HiddenDealsPanel } from '@/components/dashboard/DealExclusions'
+import PipelineBreakdown from '../pipeline-summary/PipelineBreakdown'
+
+function wonCategory(o: Opportunity): string {
+  return o.category || 'Uncategorised'
+}
 
 function euros(n: number) {
   return new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
@@ -134,6 +139,10 @@ export default function WinsSummaryClient({ all, year, exclusions, canEdit, excl
       .slice(0, 10)
   }, [won, selectedCat])
 
+  const excludedNote = [
+    excludeTestAccounts ? TEST_COMPANIES_RAW.join(', ') : '',
+    excludeTensorX ? TENSORX_COMPANIES_RAW.join(', ') : '',
+  ].filter(Boolean).join(', ')
   const maxChart = Math.max(...chartRows.map(r => r.rev), 1)
   const dateStr  = today.toLocaleDateString('en-IE', { day: 'numeric', month: 'long', year: 'numeric' })
   const periodLabel = `${new Date(dateFrom).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })} — ${new Date(dateTo).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' })}`
@@ -323,6 +332,14 @@ export default function WinsSummaryClient({ all, year, exclusions, canEdit, excl
             </div>
           </div>
         </div>
+
+        <PipelineBreakdown
+          mode="won"
+          deals={won}
+          categoryOf={wonCategory}
+          hide={canEdit && exclusionsReady ? hidden : null}
+          footnote={`Wins closed ${periodLabel}.${excludedNote ? ` Excludes: ${excludedNote}.` : ''} Source: ICT SalesIQ, ${dateStr}.`}
+        />
       </div>
 
       <div style={{ textAlign: 'center', padding: '12px 0 20px', color: '#94a3b8', fontSize: 11, borderTop: '1px solid #e2e8f0', marginTop: 8 }}>
