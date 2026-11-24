@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Opportunity } from '@/types'
 import type { DealExclusion } from '@/lib/exclusions'
 import DealDetail from './DealDetail'
+import PipelineBreakdown from './PipelineBreakdown'
 import { useDealExclusions, HideDealButton, HideDealDialog, HiddenDealsPanel } from '@/components/dashboard/DealExclusions'
 
 function euros(n: number) {
@@ -347,7 +348,14 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
         <p style={{ fontSize: 11, color: '#94a3b8', margin: '0 0 24px' }}>
           Open pipeline {hideOnHold ? 'excludes' : 'includes'} On Hold.{closeCutoff ? ` Limited to deals projected to close by ${fmtDay(closeCutoff)}; ${deferred.count} deals worth ${euros(deferred.rev)} projected later are left out${noDateCount ? `, and ${noDateCount} with no projected date are included` : ''}.` : ''} Won and lost are deals closed {periodLabel}.{excludedNote ? ` Excludes: ${excludedNote}.` : ''} Source: ICT SalesIQ, {dateStr}.
         </p>
-        <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: .5, textTransform: 'uppercase', color: '#475569', margin: '0 0 12px' }}>Detail: by category and stage</h2>
+        <PipelineBreakdown
+          deals={openPipeline}
+          categoryOf={effectiveCategory}
+          hide={canEdit && exclusionsReady ? hidden : null}
+          footnote={`Open pipeline ${hideOnHold ? 'excludes' : 'includes'} On Hold${closeCutoff ? `; deals projected to close by ${fmtDay(closeCutoff)}` : ''}${excludedNote ? `. Excludes: ${excludedNote}` : ''}. Source: ICT SalesIQ, ${dateStr}.`}
+        />
+
+        <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: .5, textTransform: 'uppercase', color: '#475569', margin: '24px 0 12px' }}>Detail: by category and stage</h2>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
 
