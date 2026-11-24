@@ -48,7 +48,8 @@ export async function middleware(request: NextRequest) {
   const isApi  = path.startsWith('/api')
   if (user && (isPage || isApi)) {
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-    if (profile?.role === AM_ONLY_ROLE) {
+    // Fail closed: a missing profile is treated like an Account Manager (most restricted)
+    if (!profile || profile.role === AM_ONLY_ROLE) {
       const under = (base: string) => path === base || path.startsWith(base + '/')
       if (isApi && !AM_ONLY_APIS.some(under)) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
