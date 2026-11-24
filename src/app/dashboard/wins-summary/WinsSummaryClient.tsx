@@ -69,13 +69,14 @@ export default function WinsSummaryClient({ all, year, exclusions, canEdit, excl
     { label: 'All Time',  from: new Date(2018, 0, 1),      to: new Date(year+1, 11, 31) },
   ]
 
-  // Won deals whose created_date falls inside the selected range.
+  // Won deals closed inside the selected range (created_date only where no close date is recorded).
   const won = useMemo(() => {
     const from = new Date(dateFrom)
     const to   = new Date(dateTo); to.setHours(23, 59, 59)
     return base.filter(o => {
       if (o.normalised_status !== 'won') return false
-      const d = o.created_date ? new Date(o.created_date) : null
+      const raw = o.closed_date || o.created_date
+      const d = raw ? new Date(raw) : null
       if (!d) return false
       return d >= from && d <= to
     })
