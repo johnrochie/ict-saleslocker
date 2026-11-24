@@ -8,11 +8,16 @@ function euros(n: number) {
   return new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
 }
 
+function fmtDate(s: string | null) {
+  return s ? new Date(s).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+}
+
 type HideState = ReturnType<typeof useDealExclusions>
 
 // Top deals in each chosen category of the open pipeline, laid out as panels
 // (the "Pipeline Breakdown" slide). Uses whatever the page filters leave in the open pipeline.
-export default function PipelineBreakdown({ deals, categoryOf, hide, footnote }: {
+export default function PipelineBreakdown({ deals, categoryOf, hide, footnote, mode = 'open' }: {
+  mode?: 'open' | 'won'
   deals: Opportunity[]
   categoryOf: (o: Opportunity) => string
   hide: HideState | null          // null when the user can't hide deals
@@ -60,7 +65,7 @@ export default function PipelineBreakdown({ deals, categoryOf, hide, footnote }:
   return (
     <div style={{ marginTop: 24 }}>
       <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: .5, textTransform: 'uppercase', color: '#475569', margin: '0 0 10px' }}>
-        Pipeline breakdown: top deals by category
+        {mode === 'won' ? 'Wins breakdown: top deals by category' : 'Pipeline breakdown: top deals by category'}
       </h2>
 
       <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 12 }}>
@@ -84,20 +89,22 @@ export default function PipelineBreakdown({ deals, categoryOf, hide, footnote }:
               {c.items.map(t => (
                 <div key={t.cat} style={{ background: 'white', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
                   <div style={{ background: '#1e3a5f', color: 'white', padding: '8px 14px', fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase' }}>
-                    Top {t.deals.length} — {t.cat} (Open Pipeline)
+                    Top {t.deals.length} — {t.cat} ({mode === 'won' ? 'Won' : 'Open Pipeline'})
                   </div>
                   <table className="ps-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead><tr><th>#</th><th>Company</th><th>Deal</th><th>Stage</th><th className="r">Value</th></tr></thead>
+                    <thead><tr><th>#</th><th>Company</th><th>Deal</th><th>{mode === 'won' ? 'Closed' : 'Stage'}</th><th className="r">Value</th></tr></thead>
                     <tbody>
                       {t.deals.map((o, idx) => (
                         <tr key={o.id}>
                           <td style={{ color: '#94a3b8' }}>{idx + 1}</td>
                           <td style={{ fontWeight: 600 }}>{o.company}</td>
                           <td style={{ color: '#64748b' }}>{o.opportunity_name}</td>
-                          <td style={{ color: o.normalised_status === 'on_hold' ? '#d97706' : undefined }}>
-                            {o.normalised_status === 'on_hold' ? 'On Hold' : (o.stage || 'Unknown')}
+                          <td style={{ whiteSpace: mode === 'won' ? 'nowrap' : undefined, color: o.normalised_status === 'on_hold' ? '#d97706' : undefined }}>
+                            {mode === 'won'
+                              ? fmtDate(o.closed_date || o.created_date)
+                              : (o.normalised_status === 'on_hold' ? 'On Hold' : (o.stage || 'Unknown'))}
                           </td>
-                          <td className="r" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
+                          <td className="r" style={{ fontWeight: 700, whiteSpace: 'nowrap', color: mode === 'won' ? '#16a34a' : undefined }}>
                             {euros(o.revenue_total)}
                             {hide && <span className="no-print" style={{ marginLeft: 6 }}><HideDealButton deal={o} state={hide} /></span>}
                           </td>
