@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminSupabaseClient } from '@/lib/supabase/server'
 import {
   SALES_TEAM, AM_EXCLUDED_KEYS, monthBounds, repDisplayName, amTierConfig,
-  AM_LEAD_SOURCE, AM_MEETING_TYPE, AM_DEFAULT_MONTHLY_TARGET,
+  AM_LEAD_SOURCE, AM_MEETING_TYPE, AM_DEFAULT_MONTHLY_TARGET, companyKey,
 } from '@/lib/config'
 
 interface Meeting {
@@ -29,7 +29,6 @@ interface Opp {
   created_date: string | null; closed_date: string | null
 }
 
-const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase()
 // Autotask has "Taylor , Jamie" on some records; tidy spacing so one person is not shown twice
 const tidyName = (s: string | null): string | null => (s ? s.replace(/\s*,\s*/g, ', ').replace(/\s+/g, ' ').trim() : s)
 const addDays = (iso: string, n: number) => {
@@ -98,7 +97,7 @@ export async function GET(request: NextRequest) {
   const opps      = ((oppsRes.data ?? []) as Opp[]).map(o => ({
     ...o, opportunity_owner: tidyName(o.opportunity_owner), account_manager: tidyName(o.account_manager),
   }))
-  const custByName = new Map(customers.map(c => [norm(c.company), c]))
+  const custByName = new Map(customers.map(c => [companyKey(c.company), c]))
 
   // Reps shown: whole team for managers, just the signed-in AM otherwise
   const repKeys = new Set<string>(SALES_TEAM.map(r => r.key))
@@ -107,7 +106,7 @@ export async function GET(request: NextRequest) {
   const visibleKeys = [...repKeys].filter(k => !AM_EXCLUDED_KEYS.includes(k) && (isManager || k === ownKey))
 
   const withTier = (m: Meeting) => {
-    const c = custByName.get(norm(m.company))
+    const c = custByName.get(companyKey(m.company))
     return { ...m, tier: c?.tier ?? null, inList: !!c }
   }
   const oppOwner = (o: Opp) =>
@@ -168,7 +167,7 @@ export async function GET(request: NextRequest) {
     .filter(c => isManager || c.account_manager === ownKey)
     .map(c => {
       const cfg         = amTierConfig(c.tier)
-      const visits      = meetings.filter(m => norm(m.company) === norm(c.company) && m.start_date)
+      const visits      = meetings.filter(m => companyKey(m.company) === companyKey(c.company) && m.start_date)
       const held12      = visits.filter(m => m.start_date! <= today && m.start_date! > addDays(today, -365))
       const lastVisit   = visits.filter(m => m.start_date! <= today).map(m => m.start_date!).sort().pop() ?? null
       const nextPlanned = visits.filter(m => m.start_date! > today).map(m => m.start_date!).sort()[0] ?? null

@@ -160,6 +160,21 @@ export const AM_ONLY_ROLE = 'account_manager'
 export const AM_ONLY_PAGES = ['/dashboard/account-management', '/dashboard/weekly']
 export const AM_ONLY_APIS  = ['/api/account-management', '/api/weekly']
 
+/**
+ * Matching key for company names, so "Public Service Credit Union Ltd" and
+ * "Public Service Credit Union" count as the same account. Ignores case,
+ * punctuation, "the", "&" vs "and" and legal endings (Ltd, Limited, DAC, CLG,
+ * PLC, Inc, UC, Unlimited Company, T/A ...).
+ */
+export function companyKey(name: string | null | undefined): string {
+  let s = (name ?? '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9\s]/g, ' ')
+  s = s.replace(/\s+/g, ' ').trim()
+  s = s.replace(/^the /, '')
+  const endings = /\s+(ltd|limited|plc|dac|clg|llc|inc|uc|unlimited company|designated activity company|company limited by guarantee|t a .*)$/
+  for (let i = 0; i < 3 && endings.test(s); i++) s = s.replace(endings, '')
+  return s.trim()
+}
+
 /** On the sales team but not part of the Account Management programme, so left off the AM pages. */
 export const AM_EXCLUDED_KEYS = ['Conboy, John']
 
