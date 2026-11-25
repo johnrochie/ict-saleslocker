@@ -2,7 +2,26 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { AM_ONLY_ROLE, AM_ONLY_PAGES, AM_ONLY_APIS } from '@/lib/config'
 
+// Scheduled syncs (vercel.json crons). Vercel calls these with a GET carrying
+// "Authorization: Bearer <CRON_SECRET>" and no login session. Each route checks
+// the secret itself and answers 401 without it, so the login gate steps aside
+// here, for these exact paths and only for bearer-token GETs.
+const CRON_PATHS = [
+  '/api/autotask/sync',
+  '/api/autotask-qpo/sync',
+  '/api/bullhorn/sync',
+  '/api/xero/sync',
+]
+
 export async function middleware(request: NextRequest) {
+  if (
+    request.method === 'GET' &&
+    CRON_PATHS.includes(request.nextUrl.pathname) &&
+    (request.headers.get('authorization') ?? '').startsWith('Bearer ')
+  ) {
+    return NextResponse.next()
+  }
+
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
