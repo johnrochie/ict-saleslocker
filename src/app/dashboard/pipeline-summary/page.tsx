@@ -28,5 +28,20 @@ export default async function PipelineSummaryPage() {
 
   const { exclusions, canEdit, ready } = await loadExclusions(supabase)
 
-  return <PipelineSummaryClient all={all} year={year} exclusions={exclusions} canEdit={canEdit} exclusionsReady={ready} />
+  // New customer engagements: companies and quotes from the Autotask sync. If the
+  // tables don't exist yet (migration 022 not run) or are still empty, say so on the page.
+  const [custRes, quoteRes] = await Promise.all([
+    supabase.from('autotask_customers').select('autotask_id, company_name, create_date').limit(5000),
+    supabase.from('autotask_quotes').select('autotask_id, name, opportunity_id, company_id, create_date').limit(10000),
+  ])
+  const customers = custRes.data ?? []
+  const quotes    = quoteRes.data ?? []
+  const customersReady = !custRes.error && !quoteRes.error && (customers.length > 0 || quotes.length > 0)
+
+  return (
+    <PipelineSummaryClient
+      all={all} year={year} exclusions={exclusions} canEdit={canEdit} exclusionsReady={ready}
+      customers={customers} quotes={quotes} customersReady={customersReady}
+    />
+  )
 }

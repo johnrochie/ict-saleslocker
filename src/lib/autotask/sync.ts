@@ -7,6 +7,7 @@ import { AutotaskClient, FILTER_ALL, FILTER_ACTIVE } from './client'
 import { fetchOpportunityPicklists } from './picklists'
 import { buildResourceMap, buildCompanyMap, transformOpportunity } from './transform'
 import { syncMeetings } from './meetings'
+import { syncNewCustomers } from './customers'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import { fetchAllRows } from '@/lib/supabase/pagination'
 import type { AutotaskOpportunity, AutotaskCompany, AutotaskResource, AutotaskContact, SyncResult } from './types'
@@ -387,6 +388,15 @@ export async function syncOpportunities(triggeredBy: string): Promise<SyncResult
       error_count: 1,
       errors:      [{ row: 0, message: err instanceof Error ? err.message : 'Unknown error' }],
     })
+  }
+
+  // ── 9b. New customers + quotes (non-fatal) ──────────────────
+  // Feeds the "New customer engagements" section of the monthly review.
+  try {
+    const c = await syncNewCustomers(client, admin, companies, rawOpps, triggeredBy)
+    console.log(`[autotask/customers] ${c.customers} customers, ${c.quotes} quotes, ${c.errors.length} errors`)
+  } catch (err) {
+    console.error(`[autotask/customers] Sync failed (non-fatal): ${err instanceof Error ? err.message : err}`)
   }
 
   // ── 10. Log and return ──────────────────────────────────────

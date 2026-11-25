@@ -5,6 +5,7 @@ import { Opportunity } from '@/types'
 import type { DealExclusion } from '@/lib/exclusions'
 import DealDetail from './DealDetail'
 import PipelineBreakdown from './PipelineBreakdown'
+import NewCustomers, { type NewCustomer, type CustomerQuote } from './NewCustomers'
 import { useDealExclusions, HideDealButton, HideDealDialog, HiddenDealsPanel } from '@/components/dashboard/DealExclusions'
 
 function euros(n: number) {
@@ -45,8 +46,9 @@ function toDateInput(d: Date) {
 function fmtDay(d: Date) { return d.toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' }) }
 const COMMENTARY_KEY = 'pipeline-summary-commentary'
 
-export default function PipelineSummaryClient({ all, year, exclusions, canEdit, exclusionsReady }: {
+export default function PipelineSummaryClient({ all, year, exclusions, canEdit, exclusionsReady, customers, quotes, customersReady }: {
   all: Opportunity[]; year: number; exclusions: DealExclusion[]; canEdit: boolean; exclusionsReady: boolean
+  customers: NewCustomer[]; quotes: CustomerQuote[]; customersReady: boolean
 }) {
   const today = new Date()
   const hidden = useDealExclusions(exclusions)
@@ -353,6 +355,16 @@ export default function PipelineSummaryClient({ all, year, exclusions, canEdit, 
           categoryOf={effectiveCategory}
           hide={canEdit && exclusionsReady ? hidden : null}
           footnote={`Open pipeline ${hideOnHold ? 'excludes' : 'includes'} On Hold${closeCutoff ? `; deals projected to close by ${fmtDay(closeCutoff)}` : ''}${excludedNote ? `. Excludes: ${excludedNote}` : ''}. Source: ICT SalesIQ, ${dateStr}.`}
+        />
+
+        <NewCustomers
+          customers={customers}
+          quotes={quotes}
+          deals={base}
+          excludedNames={[...(excludeTestAccounts ? TEST_COMPANIES : []), ...(excludeTensorX ? TENSORX_COMPANIES : [])]}
+          asOf={periodTo}
+          ready={customersReady}
+          footnote={`Customers created in the 30 days up to ${fmtDay(periodTo)} with at least one quote. Value is the revenue of the deals those quotes sit on${excludedNote ? `. Excludes: ${excludedNote}` : ''}. Source: ICT SalesIQ, ${dateStr}.`}
         />
 
         <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: .5, textTransform: 'uppercase', color: '#475569', margin: '24px 0 12px' }}>Detail: by category and stage</h2>
