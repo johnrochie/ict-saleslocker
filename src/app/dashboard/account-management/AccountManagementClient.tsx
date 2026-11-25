@@ -114,19 +114,35 @@ const TierPill = ({ tier }: { tier: string | null }) =>
 
 // ── Overview ─────────────────────────────────────────────────
 function Overview({ data, openReview }: { data: Data; openReview: (key: string) => void }) {
+  // AMs can be hidden from this view. Hidden AMs drop out of the table and every total.
+  const [hidden, setHidden] = useState<string[]>([])
+  useEffect(() => {
+    try { const s = localStorage.getItem('am-hidden-reps'); if (s) setHidden(JSON.parse(s)) } catch { /* ignore */ }
+  }, [])
+  const saveHidden = (next: string[]) => {
+    setHidden(next)
+    try { localStorage.setItem('am-hidden-reps', JSON.stringify(next)) } catch { /* ignore */ }
+  }
+  const toggleHidden = (key: string) => saveHidden(hidden.includes(key) ? hidden.filter(k => k !== key) : [...hidden, key])
+  const shown       = data.reps.filter(r => !hidden.includes(r.key))
+  const hiddenReps  = data.reps.filter(r => hidden.includes(r.key))
+
   const overdueBy = (key: string) => data.coverage.filter(c => c.account_manager === key && c.status === 'overdue').length
-  const tot = data.reps.reduce((a, r) => ({
+  const tot = shown.reduce((a, r) => ({
     held: a.held + r.held.length, target: a.target + r.target,
     planned: a.planned + r.planned.length,
     oppValue: a.oppValue + r.opps.monthValue, oppCount: a.oppCount + r.opps.monthCount,
     won: a.won + r.opps.ytdWonValue,
   }), { held: 0, target: 0, planned: 0, oppValue: 0, oppCount: 0, won: 0 })
-  const overdueAll = data.coverage.filter(c => c.status === 'overdue').length
+  const shownKeys  = new Set(shown.map(r => r.key))
+  const overdueAll = data.coverage.filter(c => c.status === 'overdue' && shownKeys.has(c.account_manager)).length
+  const avgTarget  = shown.length > 0 ? tot.target / shown.length : 0
 
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Kpi label="Visits held" value={`${tot.held} / ${num(tot.target)}`} sub={`${data.month.label}, held vs target`} />
+        <Kpi label="Visits held" value={`${tot.held} / ${num(tot.target)}`}
+          sub={`${data.month.label}, avg target ${num(Math.round(avgTarget * 10) / 10)} per AM (${shown.length})`} />
         <Kpi label="Still planned" value={String(tot.planned)} sub="Later this month" />
         <Kpi label="Opportunities from visits" value={String(tot.oppCount)} sub={eur(tot.oppValue) + ' this month'} />
         <Kpi label="Won from visits (YTD)" value={eur(tot.won)} sub={`Lead source: ${data.leadSource}`} />
@@ -144,7 +160,7 @@ function Overview({ data, openReview }: { data: Data; openReview: (key: string) 
             </tr>
           </thead>
           <tbody>
-            {data.reps.map(r => {
+            {shown.map(r => {
               const c = pctColour(r.held.length, r.target)
               const od = overdueBy(r.key)
               return (
@@ -165,13 +181,32 @@ function Overview({ data, openReview }: { data: Data; openReview: (key: string) 
                   <td className="px-3 text-gray-600">{r.opps.openCount} <span className="text-gray-400">({eur(r.opps.openValue)})</span></td>
                   <td className="px-3 text-gray-600">{r.opps.ytdWonCount} <span className="text-gray-400">({eur(r.opps.ytdWonValue)})</span></td>
                   <td className="px-3">{od > 0 ? <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700">{od}</span> : <span className="text-gray-300">0</span>}</td>
-                  <td className="px-3"><button onClick={() => openReview(r.key)} className="text-xs text-brand-600 hover:underline">Review</button></td>
+                  <td className="px-3 whitespace-nowrap">
+                    <button onClick={() => openReview(r.key)} className="text-xs text-brand-600 hover:underline">Review</button>
+                    <button onClick={() => toggleHidden(r.key)} className="text-xs text-gray-400 hover:text-gray-600 hover:underline ml-3"
+                      title="Hide from this view and leave out of the totals">Hide</button>
+                  </td>
                 </tr>
               )
             })}
+            {shown.length === 0 && (
+              <tr><td colSpan={9} className="px-5 py-6 text-center text-sm text-gray-400">All account managers are hidden.</td></tr>
+            )}
           </tbody>
         </table>
       </div>
+      {hiddenReps.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+          <span>Hidden, and left out of the totals:</span>
+          {hiddenReps.map(r => (
+            <button key={r.key} onClick={() => toggleHidden(r.key)}
+              className="px-2 py-0.5 rounded-full border border-gray-200 hover:bg-gray-50" title="Show again">
+              {r.display} &middot; show
+            </button>
+          ))}
+          <button onClick={() => saveHidden([])} className="text-brand-600 hover:underline">Show all</button>
+        </div>
+      )}
       <p className="text-xs text-gray-400">
         Target = each AM's customers' tier visit cadence ÷ 12. Visits are Autotask meetings of type Account Management Meeting.
         Opportunities count where the AM chose Lead Source "{data.leadSource}".
